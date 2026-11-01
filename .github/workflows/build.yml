@@ -1,0 +1,43 @@
+name: Build plugin
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Get this project
+        uses: actions/checkout@v5
+
+      - name: Get CommonLibSSE-NG (pinned release v15.0.1)
+        run: git clone --depth 1 --branch v15.0.1 --recurse-submodules --shallow-submodules https://github.com/alandtse/CommonLibSSE-NG.git lib/commonlibsse-ng
+
+      - name: Set up xmake
+        uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: latest
+          package-cache: true
+
+      - name: Update xmake package list
+        run: xmake repo --update
+
+      - name: Configure
+        run: xmake config -m releasedbg -a x64 --yes
+
+      - name: Build
+        run: xmake build --yes FastTravelArrivalPlanner
+
+      - name: Assemble mod folder
+        shell: pwsh
+        run: |
+          ./tools/package.ps1
+          Get-ChildItem -Recurse mod | Format-Table FullName, Length
+
+      - name: Upload mod
+        uses: actions/upload-artifact@v7
+        with:
+          name: FastTravelArrivalPlanner-mod
+          path: mod/
+          if-no-files-found: error
