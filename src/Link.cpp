@@ -76,6 +76,16 @@ namespace FTAP::Link
 		return true;
 	}
 
+	bool GetFlyoutText(FTTI_API::FlyoutText& a_out)
+	{
+		a_out = FTTI_API::FlyoutText{};
+		const auto iface = Get();
+		if (!iface || iface->version < FTTI_API::FLYOUT_TEXT_VERSION || iface->size < sizeof(FTTI_API::Interface) || !iface->GetFlyoutText) {
+			return false;  // FTTI older than 0.3.0
+		}
+		return iface->GetFlyoutText(&a_out, static_cast<std::uint32_t>(sizeof(a_out)));
+	}
+
 	std::string FormatArrival(double a_hoursFromNow)
 	{
 		std::array<char, 256> buffer{};

@@ -51,8 +51,8 @@ Your settings live in `Documents\My Games\Skyrim Special Edition\SKSE\FastTravel
 
 - **`bShowPanel = 0`** brings back the game's own box, in case another interface mod conflicts.
 - **`fMinHoursForFaster`** sets the 1-hour threshold for Instant, 1/3 and 1/2. 0 removes the limit.
-- **`bMatchMapStyle`** (on by default): the panel takes its colours from the map's location flyout, so it follows your interface mod, and its background from Fast Travel Time Info's background settings. 0 uses SKSE Menu Framework's own theme.
-- **`sFont`**: a font by the name SKSE Menu Framework lists in its own settings. Empty means the framework's font.
+- **`bMatchMapStyle`** (on by default): the panel looks like the map's location flyout, whatever interface mod draws it: colours, font, text sizes and text shadow are read from the flyout while the game runs, and the background follows Fast Travel Time Info's background settings. The font is used only if SKSE Menu Framework has it. 0 uses SKSE Menu Framework's own theme.
+- **`sFont`**: a font by the name SKSE Menu Framework lists in its own settings. Empty means the flyout's font (if the framework has it), otherwise the framework's font.
 
 ## Credits
 
@@ -62,6 +62,7 @@ Your settings live in `Documents\My Games\Skyrim Special Edition\SKSE\FastTravel
 
 ## Changelog
 
+- **0.0.10**: The panel follows the flyout's font, text sizes (the heading as large as the location name, the rest as large as the flyout's rows) and text shadow, as well as its colours, so it matches whatever interface mod draws the map (needs Fast Travel Time Info 0.3.0 or newer). The log line *Panel look:* shows what was used.
 - **0.0.9**: The old Later method (`bLaterByClock = 0`, a stretched trip that could miss the hour by many hours) is gone: Later is always a normal trip, then the clock moves forward to the exact hour. The option is removed from your settings file automatically, with its comment lines.
 - **0.0.8**:
   - The panel matches the map's location flyout: no title bar, the flyout's colours and diamond bullets, Fast Travel Time Info's background and corners, and the timing choices as words that light up instead of round buttons. The heading reads "Travel to ..." (with Fast Travel Time Info 0.2.0 or newer; with older versions it uses plain colours).

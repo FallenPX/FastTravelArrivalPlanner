@@ -74,6 +74,16 @@ namespace FTAP::Panel
 			ImGuiMCP::ImVec4 value{ 1, 1, 1, 1 };
 			ImGuiMCP::ImVec4 background{ 0, 0, 0, 0.6f };
 			float            rounding{ 4.5f };  // screen pixels
+
+			// Text, as the flyout draws it (Fast Travel Time Info 0.3.0 or newer).
+			std::string                   rowFont;    // SKSE Menu Framework font name ("" = the framework's own)
+			std::string                   titleFont;
+			float                         rowSize{ 0.0f };    // screen pixels (0 = keep the framework's size)
+			float                         titleSize{ 0.0f };
+			bool                          shadow{ false };
+			ImGuiMCP::ImU32               shadowColor{ 0 };
+			std::vector<ImGuiMCP::ImVec2> shadowOffsets;  // one for a drop shadow, four for a glow
+			std::string                   summary;        // for the log
 		};
 
 		// Panel state (render thread only), reset whenever a new panel opens.
@@ -85,6 +95,8 @@ namespace FTAP::Panel
 			int           laterHour{ 0 };
 			double        openedAt{ 0.0 };  // ImGui time
 			Look          look;
+			std::string   fontName;         // the font the panel asks the framework for
+			int           fontPushed{ 0 };  // 1 = pushed this frame
 		};
 		UiState g_ui;
 
@@ -122,7 +134,100 @@ namespace FTAP::Panel
 				scale = viewport->Size.y / 720.0f;
 			}
 			look.rounding = style.cornerRadius * scale;
+
+			// Font, sizes and shadow. When FTTI cannot tell (older than 0.3.0, or the flyout has
+			// not been shown yet), the text gets a light drop shadow, as most map skins have.
+			FTTI_API::FlyoutText text;
+			const bool           textKnown = Link::GetFlyoutText(text);
+			look.rowFont = text.rowFont;
+			look.titleFont = text.titleFont;
+			look.rowSize = text.rowSize;
+			look.titleSize = text.titleSize;
+			float alpha = 0.75f;
+			float distance = 1.5f;
+			float angle = 45.0f;
+			float blur = 0.0f;
+			std::uint32_t color = 0x000000;
+			if (textKnown) {
+				look.shadow = text.shadow && text.shadowAlpha > 0.02f;
+				alpha = text.shadowAlpha;
+				distance = text.shadowDistance;
+				angle = text.shadowAngle;
+				blur = text.shadowBlur;
+				color = text.shadowColor;
+			} else {
+				look.shadow = true;
+			}
+			if (look.shadow) {
+				if (distance >= 0.5f) {
+					const float radians = angle * 3.14159265f / 180.0f;
+					const float d = (std::max)(distance, 1.0f);
+					look.shadowOffsets.push_back(ImGuiMCP::ImVec2{ std::cos(radians) * d, std::sin(radians) * d });
+				} else {  // a glow: a thin outline all round
+					const float d = std::clamp(blur * 0.4f, 1.0f, 2.0f);
+					look.shadowOffsets = { { -d, -d }, { d, -d }, { -d, d }, { d, d } };
+					alpha *= 0.7f;
+				}
+				look.shadowColor = ImGuiMCP::GetColorU32(Rgb(color, std::clamp(alpha, 0.0f, 1.0f)));
+			}
+			look.summary = std::format("fonts \"{}\" / \"{}\", sizes {:.1f} / {:.1f} px, {}", look.titleFont, look.rowFont,
+				look.titleSize, look.rowSize,
+				!look.shadow ? "no shadow"s :
+				               std::format("shadow #{:06X} {:.0f}% {:.1f} px at {:.0f} deg{}", color, alpha * 100.0f, distance, angle,
+								   textKnown ? "" : " (default: Fast Travel Time Info could not tell)"));
 			return look;
+		}
+
+		// Fonts SKSE Menu Framework does not have (or that change nothing), so they are not asked
+		// for again: the framework logs a warning every time it is asked for an unknown font.
+		std::set<std::string> g_fontsWithoutEffect;
+
+		// Asks SKSE Menu Framework for a font by name. Undone with FontAwesome::Pop, the framework's
+		// call that clears every font pushed this frame.
+		bool PushFontByName(const std::string& a_name)
+		{
+			if (a_name.empty() || g_fontsWithoutEffect.contains(a_name)) {
+				return false;
+			}
+			// Without the framework's reset call (older versions) a pushed font would stay pushed.
+			static const bool canReset = SKSEMenuFramework::Model::Internal::GetFunction<SKSEMenuFramework::Model::ActionFunction>("Pop") != nullptr &&
+			                             SKSEMenuFramework::Model::Internal::GetFunction<SKSEMenuFramework::Model::PushFontFunction>("PushFont") != nullptr;
+			if (!canReset) {
+				g_fontsWithoutEffect.insert(a_name);
+				logs::info("Panel: this SKSE Menu Framework cannot switch fonts for other mods; using its own font");
+				return false;
+			}
+			const auto before = ImGuiMCP::GetFont();
+			SKSEMenuFramework::PushFont(a_name);
+			if (ImGuiMCP::GetFont() != before) {
+				return true;
+			}
+			FontAwesome::Pop();
+			g_fontsWithoutEffect.insert(a_name);
+			logs::info("Panel: SKSE Menu Framework has no separate font named \"{}\"; using the current one", a_name);
+			return false;
+		}
+
+		// The font scale that gives a_size pixels, from the framework font's own size.
+		float ScaleFor(float a_size, float a_base)
+		{
+			if (a_size <= 0.0f || a_base <= 0.0f) {
+				return 1.0f;
+			}
+			return std::clamp(a_size / a_base, 0.6f, 2.0f);
+		}
+
+		// Text with the flyout's shadow under it.
+		void ShadowText(const Look& a_look, const ImGuiMCP::ImVec4& a_color, const char* a_text)
+		{
+			if (a_look.match && a_look.shadow) {
+				const auto pos = ImGuiMCP::GetCursorScreenPos();
+				auto*      drawList = ImGuiMCP::GetWindowDrawList();
+				for (const auto& offset : a_look.shadowOffsets) {
+					ImGuiMCP::ImDrawListManager::AddText(drawList, ImGuiMCP::ImVec2{ pos.x + offset.x, pos.y + offset.y }, a_look.shadowColor, a_text);
+				}
+			}
+			ImGuiMCP::TextColored(a_color, "%s", a_text);
 		}
 
 		// Pushes the panel's colours and spacing; returns how many of each to pop.
@@ -176,7 +281,14 @@ namespace FTAP::Panel
 			const float  r = size * 0.16f;
 			const auto   pos = GetCursorScreenPos();
 			const ImVec2 c{ pos.x + r + size * 0.05f, pos.y + size * 0.52f };
-			ImDrawListManager::AddQuadFilled(GetWindowDrawList(), ImVec2{ c.x, c.y - r * 1.35f }, ImVec2{ c.x + r, c.y },
+			auto*        drawList = GetWindowDrawList();
+			if (a_look.shadow) {
+				for (const auto& o : a_look.shadowOffsets) {
+					ImDrawListManager::AddQuadFilled(drawList, ImVec2{ c.x + o.x, c.y - r * 1.35f + o.y }, ImVec2{ c.x + r + o.x, c.y + o.y },
+						ImVec2{ c.x + o.x, c.y + r * 1.35f + o.y }, ImVec2{ c.x - r + o.x, c.y + o.y }, a_look.shadowColor);
+				}
+			}
+			ImDrawListManager::AddQuadFilled(drawList, ImVec2{ c.x, c.y - r * 1.35f }, ImVec2{ c.x + r, c.y },
 				ImVec2{ c.x, c.y + r * 1.35f }, ImVec2{ c.x - r, c.y }, GetColorU32(a_look.title));
 			Dummy(ImVec2{ r * 2.0f + size * 0.15f, size });
 			SameLine(0.0f, size * 0.2f);
@@ -190,9 +302,9 @@ namespace FTAP::Panel
 				return;
 			}
 			Diamond(a_look);
-			ImGuiMCP::TextColored(a_look.label, "%s", a_label);
+			ShadowText(a_look, a_look.label, a_label);
 			ImGuiMCP::SameLine(0.0f, ImGuiMCP::GetFontSize() * 0.4f);
-			ImGuiMCP::TextColored(a_look.value, "%s", a_value.c_str());
+			ShadowText(a_look, a_look.value, a_value.c_str());
 		}
 
 		// One timing choice: a word that lights up when chosen, as in SkyUI's category bars.
@@ -201,16 +313,28 @@ namespace FTAP::Panel
 			using namespace ImGuiMCP;
 			const bool selected = *a_value == a_option;
 			BeginDisabled(!a_enabled);
-			if (a_look.match) {
-				PushStyleColor(ImGuiCol_Text, selected ? a_look.title : a_look.label);
-			}
 			const auto  text = CalcTextSize(a_label, nullptr, true);
 			const float pad = GetFontSize() * 0.45f;
-			PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2{ 0.5f, 0.5f });
-			const bool clicked = Selectable(a_label, selected, ImGuiSelectableFlags_None, ImVec2{ text.x + pad * 2.0f, 0.0f });
-			PopStyleVar();
+			bool        clicked = false;
 			if (a_look.match) {
-				PopStyleColor();
+				// The label is drawn here, with the flyout's colours and shadow.
+				const auto id = std::format("##timing{}", a_option);
+				clicked = Selectable(id.c_str(), selected, ImGuiSelectableFlags_None, ImVec2{ text.x + pad * 2.0f, text.y });
+				const auto min = GetItemRectMin();
+				const auto max = GetItemRectMax();
+				const ImVec2 at{ min.x + (max.x - min.x - text.x) * 0.5f, min.y + (max.y - min.y - text.y) * 0.5f };
+				auto*        drawList = GetWindowDrawList();
+				if (a_look.shadow && a_enabled) {
+					for (const auto& o : a_look.shadowOffsets) {
+						ImDrawListManager::AddText(drawList, ImVec2{ at.x + o.x, at.y + o.y }, a_look.shadowColor, a_label);
+					}
+				}
+				// GetColorU32 also applies the disabled fade.
+				ImDrawListManager::AddText(drawList, at, GetColorU32(selected ? a_look.title : a_look.label), a_label);
+			} else {
+				PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2{ 0.5f, 0.5f });
+				clicked = Selectable(a_label, selected, ImGuiSelectableFlags_None, ImVec2{ text.x + pad * 2.0f, 0.0f });
+				PopStyleVar();
 			}
 			EndDisabled();
 			if (!a_enabled && a_disabledReason && IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -258,7 +382,21 @@ namespace FTAP::Panel
 			// Heading and the normal trip
 			const auto heading = std::format("Travel to {}", a_data.destination);
 			if (a_look.match) {
-				ImGuiMCP::TextColored(a_look.title, "%s", heading.c_str());
+				// The flyout's title font and size, then back to the row font and size.
+				const bool titleFont = !a_look.titleFont.empty() && a_look.titleFont != g_ui.fontName;
+				if (titleFont) {
+					FontAwesome::Pop();
+					PushFontByName(a_look.titleFont);
+				}
+				ImGuiMCP::SetWindowFontScale(1.0f);
+				ImGuiMCP::SetWindowFontScale(ScaleFor(a_look.titleSize, ImGuiMCP::GetFontSize()));
+				ShadowText(a_look, a_look.title, heading.c_str());
+				if (titleFont) {
+					FontAwesome::Pop();
+					g_ui.fontPushed = PushFontByName(g_ui.fontName) ? 1 : 0;
+				}
+				ImGuiMCP::SetWindowFontScale(1.0f);
+				ImGuiMCP::SetWindowFontScale(ScaleFor(a_look.rowSize, ImGuiMCP::GetFontSize()));
 			} else {
 				ImGuiMCP::Text("%s", heading.c_str());
 			}
@@ -339,8 +477,10 @@ namespace FTAP::Panel
 			const auto arrival = hasEstimate || g_ui.timing == static_cast<int>(Timing::kInstant) ? Link::FormatArrival(arrivalHours) : std::string("as the game decides");
 			Row(a_look, "Arrival:", arrival);
 			if (hasEstimate && g_ui.timing == static_cast<int>(Timing::kLater) && laterHours - trip.hours > 24.0) {
+				ImGuiMCP::PushTextWrapPos(ImGuiMCP::GetFontSize() * 26.0f);
 				ImGuiMCP::TextWrapped("%s", "More than a day after the normal arrival. Time passes as if you waited: timed effects end, "
 											"vampirism and survival needs advance, and followers you left waiting may leave.");
+				ImGuiMCP::PopTextWrapPos();
 			}
 			if (hasEstimate && !trip.calibrated && g_ui.timing != static_cast<int>(Timing::kNormal)) {
 				ImGuiMCP::TextDisabled("%s", "The travel time is approximate, so the arrival may be off.");
@@ -399,15 +539,14 @@ namespace FTAP::Panel
 				}
 				const auto& look = g_ui.look;
 
-				// The player's chosen font, if SKSE Menu Framework has it (the framework pushes
-				// nothing for an unknown name, so check before popping).
+				// Font: the one named in the settings, else the flyout's, else the framework's own.
 				const auto settings = Settings::Current();
-				bool       pushedFont = false;
-				if (!settings->font.empty()) {
-					const auto before = ImGuiMCP::GetFont();
-					SKSEMenuFramework::PushFont(settings->font);
-					pushedFont = ImGuiMCP::GetFont() != before;
+				if (g_ui.fontName.empty()) {
+					g_ui.fontName = !settings->font.empty() ? settings->font : look.match ? look.rowFont : std::string{};
+					logs::info("Panel look: {}{}", look.match ? look.summary : "SKSE Menu Framework's theme"s,
+						g_ui.fontName.empty() ? ""s : std::format("; asking SKSE Menu Framework for font \"{}\"", g_ui.fontName));
 				}
+				g_ui.fontPushed = PushFontByName(g_ui.fontName) ? 1 : 0;
 				const auto [colors, vars] = PushLook(look);
 
 				const auto viewport = ImGuiMCP::GetMainViewport();
@@ -419,14 +558,19 @@ namespace FTAP::Panel
 				const auto flags = ImGuiMCP::ImGuiWindowFlags_NoDecoration | ImGuiMCP::ImGuiWindowFlags_AlwaysAutoResize |
 				                   ImGuiMCP::ImGuiWindowFlags_NoSavedSettings;
 				if (ImGuiMCP::Begin("Fast Travel Arrival Planner###FTAPArrivalPanel", nullptr, flags)) {
+					// The window remembers its font scale, so start from the framework's own size.
+					ImGuiMCP::SetWindowFontScale(1.0f);
+					if (look.match) {
+						ImGuiMCP::SetWindowFontScale(ScaleFor(look.rowSize, ImGuiMCP::GetFontSize()));
+					}
 					RenderPanelContents(data, look);
 				}
 				ImGuiMCP::End();
 
 				ImGuiMCP::PopStyleVar(vars);
 				ImGuiMCP::PopStyleColor(colors);
-				if (pushedFont) {
-					ImGuiMCP::PopFont();
+				if (g_ui.fontPushed > 0) {
+					FontAwesome::Pop();
 				}
 			} catch (const std::exception& e) {
 				logs::error("Panel render failed: {}", e.what());
