@@ -125,8 +125,9 @@ namespace FTAP::Panel
 			look.title = Rgb(style.titleColor);
 			look.label = Rgb(style.labelColor);
 			look.value = Rgb(style.valueColor);
-			// The panel holds controls, so it never gets fainter than half opaque.
-			const float opacity = style.background ? (std::max)(style.backgroundOpacity, 0.5f) : 0.75f;
+			// Exactly FTTI's background, including none: the panel keeps the look the player chose
+			// for the flyout.
+			const float opacity = style.background ? std::clamp(style.backgroundOpacity, 0.0f, 1.0f) : 0.0f;
 			look.background = Rgb(style.backgroundColor, opacity);
 			// FTTI's corner radius is in the map's 1280 x 720 layout; the panel draws in screen pixels.
 			float scale = 1.5f;
@@ -240,7 +241,8 @@ namespace FTAP::Panel
 			const auto& l = a_look.label;
 			const std::array<std::pair<ImGuiCol, ImVec4>, 20> colors{ {
 				{ ImGuiCol_WindowBg, a_look.background },
-				{ ImGuiCol_PopupBg, WithAlpha(a_look.background, (std::max)(a_look.background.w, 0.92f)) },
+				// Tooltips have no counterpart on the flyout, so they stay readable.
+				{ ImGuiCol_PopupBg, WithAlpha(a_look.background, 0.92f) },
 				{ ImGuiCol_Border, WithAlpha(l, 0.35f) },
 				{ ImGuiCol_Text, a_look.value },
 				{ ImGuiCol_TextDisabled, WithAlpha(l, 0.55f) },
