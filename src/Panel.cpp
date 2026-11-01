@@ -97,6 +97,7 @@ namespace FTAP::Panel
 			Look          look;
 			std::string   fontName;         // the font the panel asks the framework for
 			int           fontPushed{ 0 };  // 1 = pushed this frame
+			bool          sizesLogged{ false };
 		};
 		UiState g_ui;
 
@@ -142,14 +143,16 @@ namespace FTAP::Panel
 			const bool           textKnown = Link::GetFlyoutText(text);
 			look.rowFont = text.rowFont;
 			look.titleFont = text.titleFont;
-			look.rowSize = text.rowSize;
-			look.titleSize = text.titleSize;
+			// Sizes outside what any screen could show are ignored (the framework's size is kept).
+			const auto plausible = [](float a_px) { return a_px >= 9.0f && a_px <= 96.0f; };
+			look.rowSize = plausible(text.rowSize) ? text.rowSize : 0.0f;
+			look.titleSize = plausible(text.titleSize) ? text.titleSize : 0.0f;
 			float alpha = 0.75f;
 			float distance = 1.5f;
 			float angle = 45.0f;
 			float blur = 0.0f;
 			std::uint32_t color = 0x000000;
-			if (textKnown) {
+			if (textKnown && text.shadowKnown) {  // FTTI 0.3.1+ could read the flyout's shadow
 				look.shadow = text.shadow && text.shadowAlpha > 0.02f;
 				alpha = text.shadowAlpha;
 				distance = text.shadowDistance;
@@ -175,7 +178,10 @@ namespace FTAP::Panel
 				look.titleSize, look.rowSize,
 				!look.shadow ? "no shadow"s :
 				               std::format("shadow #{:06X} {:.0f}% {:.1f} px at {:.0f} deg{}", color, alpha * 100.0f, distance, angle,
-								   textKnown ? "" : " (default: Fast Travel Time Info could not tell)"));
+								   textKnown && text.shadowKnown ? "" : " (default: Fast Travel Time Info could not tell)"));
+			if (text.rowSize != look.rowSize || text.titleSize != look.titleSize) {
+				look.summary += std::format("; ignored implausible sizes {:.1f} / {:.1f} px", text.titleSize, text.rowSize);
+			}
 			return look;
 		}
 
@@ -563,7 +569,13 @@ namespace FTAP::Panel
 					// The window remembers its font scale, so start from the framework's own size.
 					ImGuiMCP::SetWindowFontScale(1.0f);
 					if (look.match) {
-						ImGuiMCP::SetWindowFontScale(ScaleFor(look.rowSize, ImGuiMCP::GetFontSize()));
+						const float base = ImGuiMCP::GetFontSize();
+						if (!g_ui.sizesLogged) {
+							g_ui.sizesLogged = true;
+							logs::info("Panel sizes: framework font {:.1f} px; title {:.1f} px (x{:.2f}), rows {:.1f} px (x{:.2f})", base,
+								look.titleSize, ScaleFor(look.titleSize, base), look.rowSize, ScaleFor(look.rowSize, base));
+						}
+						ImGuiMCP::SetWindowFontScale(ScaleFor(look.rowSize, base));
 					}
 					RenderPanelContents(data, look);
 				}

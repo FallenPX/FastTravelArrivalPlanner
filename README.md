@@ -62,6 +62,7 @@ Your settings live in `Documents\My Games\Skyrim Special Edition\SKSE\FastTravel
 
 ## Changelog
 
+- **0.0.12**: With Fast Travel Time Info 0.3.1: text sizes that cannot be right are ignored instead of shrinking the panel, the text shadow is only left out when the flyout really has none, and the log line *Panel sizes* shows how the sizes were worked out.
 - **0.0.11**: The panel's background is exactly Fast Travel Time Info's, including none when its background is off (0.0.8 to 0.0.10 kept at least half opacity, and 75% without one). Only tooltips keep a background.
 - **0.0.10**: The panel follows the flyout's font, text sizes (the heading as large as the location name, the rest as large as the flyout's rows) and text shadow, as well as its colours, so it matches whatever interface mod draws the map (needs Fast Travel Time Info 0.3.0 or newer). The log line *Panel look:* shows what was used.
 - **0.0.9**: The old Later method (`bLaterByClock = 0`, a stretched trip that could miss the hour by many hours) is gone: Later is always a normal trip, then the clock moves forward to the exact hour. The option is removed from your settings file automatically, with its comment lines.
