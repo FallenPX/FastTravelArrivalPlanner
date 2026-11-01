@@ -441,9 +441,8 @@ namespace FTAP::Panel
 				const auto settings = Settings::Current();
 				ImGuiMCP::SeparatorText("Prototype status");
 				ImGuiMCP::TextWrapped("%s", Link::Describe().c_str());
-				ImGuiMCP::Text("Panel: %s   Faster options from: %.2f h   Later: %s",
-					settings->enabled && settings->showPanel ? "on" : "off", static_cast<double>(settings->minHoursForFaster),
-					settings->laterByClock ? "normal trip, then the clock moves" : "stretched trip");
+				ImGuiMCP::Text("Panel: %s   Faster options from: %.2f h", settings->enabled && settings->showPanel ? "on" : "off",
+					static_cast<double>(settings->minHoursForFaster));
 
 				ImGuiMCP::SeparatorText("Last planned trip");
 				const auto lines = Planner::LastTripLines();

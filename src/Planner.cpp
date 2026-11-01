@@ -382,15 +382,11 @@ namespace FTAP::Planner
 				break;
 			case Timing::kLater:
 				if (hasEstimate && a_choice.laterHours > estimate && a_choice.laterHours <= estimate + MAX_LATER_DAYS * 24.0 + 1.0) {
+					// A normal trip, then the clock moves forward to the exact time. Prototype 0.0.2
+					// stretched the trip itself, but the game's travel time differs from FTTI's
+					// estimate by up to ~15% on some routes, which over days becomes many hours.
 					trip.targetHours = a_choice.laterHours;
-					if (settings->laterByClock) {
-						// A normal trip, then the clock moves forward to the exact time. Prototype 0.0.2
-						// stretched the trip itself, but the game's travel time differs from FTTI's
-						// estimate by up to ~15% on some routes, which over days becomes many hours.
-						trip.clockTopUp = true;
-					} else {
-						factor = estimate / a_choice.laterHours;
-					}
+					trip.clockTopUp = true;
 				}
 				break;
 			default:

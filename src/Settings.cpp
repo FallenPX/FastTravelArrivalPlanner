@@ -130,7 +130,6 @@ namespace FTAP
 				MakeBool("bEnabled", &Settings::enabled),
 				MakeBool("bShowPanel", &Settings::showPanel),
 				MakeFloat("fMinHoursForFaster", &Settings::minHoursForFaster, 0.0f, 48.0f),
-				MakeBool("bLaterByClock", &Settings::laterByClock),
 				MakeBool("bSkipAfterConversation", &Settings::skipAfterConversation),
 				MakeFloat("fConversationSeconds", &Settings::conversationSeconds, 0.0f, 30.0f),
 				MakeBool("bMatchMapStyle", &Settings::matchMapStyle, "Panel"),
@@ -287,6 +286,82 @@ namespace FTAP
 			return std::nullopt;
 		}
 
+		// Options a newer version dropped (lower case). They are taken out of the player's file,
+		// with the comment lines right above them that were copied from the defaults.
+		constexpr std::array OBSOLETE_KEYS{ "blaterbyclock"sv };  // 0.0.9: Later always moves the clock
+
+		// Looks like an option name ("blaterbyclock"), not prose such as "1 = a normal trip".
+		bool IsOptionName(const std::string& a_key)
+		{
+			return a_key.size() >= 2 && std::isalpha(static_cast<unsigned char>(a_key.front())) &&
+			       std::ranges::all_of(a_key, [](unsigned char c) { return std::isalnum(c) || c == '_'; });
+		}
+
+		// The key of an option line, active or commented out, whatever its name.
+		std::optional<std::string> AnyKey(const std::string& a_line)
+		{
+			if (const auto parsed = ParseKeyLine(a_line); parsed && IsOptionName(parsed->key)) {
+				return parsed->key;
+			}
+			const auto trimmed = Trim(a_line);
+			if (trimmed.empty() || (trimmed.front() != ';' && trimmed.front() != '#')) {
+				return std::nullopt;
+			}
+			const auto start = trimmed.find_first_not_of(";# \t");
+			if (start == std::string::npos) {
+				return std::nullopt;
+			}
+			if (const auto parsed = ParseKeyLine(trimmed.substr(start)); parsed && IsOptionName(parsed->key)) {
+				return parsed->key;
+			}
+			return std::nullopt;
+		}
+
+		std::vector<std::string> RemoveObsolete(IniFile& a_ini)
+		{
+			std::vector<std::string> removed;
+			for (std::size_t i = 0; i < a_ini.lines.size();) {
+				const auto key = AnyKey(a_ini.lines[i]);
+				if (!key || std::ranges::find(OBSOLETE_KEYS, std::string_view(*key)) == OBSOLETE_KEYS.end()) {
+					++i;
+					continue;
+				}
+				// The comment block right above it, up to a blank line, a section or another option.
+				std::size_t first = i;
+				while (first > 0) {
+					const auto above = Trim(a_ini.lines[first - 1]);
+					if (above.empty() || (above.front() != ';' && above.front() != '#') || AnyKey(a_ini.lines[first - 1])) {
+						break;
+					}
+					--first;
+				}
+				// Comments only count as its own when the option ends their block; otherwise they
+				// explain the option that follows. One of the blank lines around it goes too, so
+				// no double blank line is left.
+				const bool blankAfter = i + 1 >= a_ini.lines.size() || Trim(a_ini.lines[i + 1]).empty();
+				if (!blankAfter) {
+					first = i;
+				} else if (first > 0 && Trim(a_ini.lines[first - 1]).empty()) {
+					--first;
+				}
+				auto name = Trim(std::string_view(a_ini.lines[i]).substr(0, a_ini.lines[i].find('=')));
+				name.erase(0, (std::min)(name.size(), name.find_first_not_of(";# \t")));
+				removed.push_back(std::move(name));
+				a_ini.lines.erase(a_ini.lines.begin() + static_cast<std::ptrdiff_t>(first), a_ini.lines.begin() + static_cast<std::ptrdiff_t>(i + 1));
+				i = first;
+			}
+			return removed;
+		}
+
+		std::string JoinNames(const std::vector<std::string>& a_names)
+		{
+			std::string list;
+			for (const auto& name : a_names) {
+				list += (list.empty() ? "" : ", ") + name;
+			}
+			return list;
+		}
+
 		// Creates the player's settings file from the defaults the first time, and afterwards
 		// adds any option that a newer version introduced. Nothing the player has set, changed
 		// or commented out is ever touched.
@@ -332,7 +407,16 @@ namespace FTAP
 				}
 				return;
 			}
+			const auto removed = RemoveObsolete(mine);
+			const auto logRemoved = [&]() {
+				if (!removed.empty()) {
+					logs::info("Removed option(s) this version no longer uses from your settings file: {}", JoinNames(removed));
+				}
+			};
 			if (!defaults.exists) {
+				if (!removed.empty() && WriteIni(user, mine)) {
+					logRemoved();
+				}
 				return;
 			}
 
@@ -408,6 +492,9 @@ namespace FTAP
 				comments.clear();
 			}
 			if (additions.empty()) {
+				if (!removed.empty() && WriteIni(user, mine)) {
+					logRemoved();
+				}
 				return;
 			}
 
@@ -447,11 +534,8 @@ namespace FTAP
 			}
 
 			if (WriteIni(user, mine)) {
-				std::string list;
-				for (const auto& name : addedNames) {
-					list += (list.empty() ? "" : ", ") + name;
-				}
-				logs::info("Added new option(s) to your settings file: {}", list);
+				logs::info("Added new option(s) to your settings file: {}", JoinNames(addedNames));
+				logRemoved();
 			}
 		}
 	}
@@ -490,8 +574,8 @@ namespace FTAP
 		} else {
 			logs::info("No settings file at {}, using defaults", path.string());
 		}
-		logs::info("Settings: enabled={} panel={} minHoursForFaster={:.2f} laterByClock={} skipAfterConversation={} ({:.1f} s) matchMapStyle={} font=\"{}\"",
-			loaded.enabled, loaded.showPanel, loaded.minHoursForFaster, loaded.laterByClock, loaded.skipAfterConversation,
+		logs::info("Settings: enabled={} panel={} minHoursForFaster={:.2f} skipAfterConversation={} ({:.1f} s) matchMapStyle={} font=\"{}\"",
+			loaded.enabled, loaded.showPanel, loaded.minHoursForFaster, loaded.skipAfterConversation,
 			loaded.conversationSeconds, loaded.matchMapStyle, loaded.font);
 		auto next = std::make_shared<const Settings>(std::move(loaded));
 		std::lock_guard guard{ g_lock };

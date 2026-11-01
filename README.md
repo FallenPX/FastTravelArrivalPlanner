@@ -62,6 +62,7 @@ Your settings live in `Documents\My Games\Skyrim Special Edition\SKSE\FastTravel
 
 ## Changelog
 
+- **0.0.9**: The old Later method (`bLaterByClock = 0`, a stretched trip that could miss the hour by many hours) is gone: Later is always a normal trip, then the clock moves forward to the exact hour. The option is removed from your settings file automatically, with its comment lines.
 - **0.0.8**:
   - The panel matches the map's location flyout: no title bar, the flyout's colours and diamond bullets, Fast Travel Time Info's background and corners, and the timing choices as words that light up instead of round buttons. The heading reads "Travel to ..." (with Fast Travel Time Info 0.2.0 or newer; with older versions it uses plain colours).
   - Settings move to your own file in `Documents\My Games\Skyrim Special Edition\SKSE`, which updates never replace. **Updating from 0.0.7:** if you changed anything in `Data\SKSE\Plugins\FastTravelArrivalPlanner.ini` (such as `bShowPanel`), set it again in the new file after the first start.
