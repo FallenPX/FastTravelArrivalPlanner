@@ -76,19 +76,6 @@ namespace FTAP::Planner
 			RE::NiPoint3    destinationPos;
 		};
 
-		// Checks after arrival: keeps the chosen weather for the first seconds (the game may
-		// replace it when it notices the new region) and logs the clock and weather a few times.
-		struct FollowUp
-		{
-			long long       start{ 0 };
-			RE::TESWeather* weather{ nullptr };
-			int             reapplied{ 0 };
-			std::size_t     nextLog{ 0 };
-		};
-		constexpr std::array<double, 3> FOLLOW_UP_LOG_SECONDS{ 3.0, 10.0, 30.0 };
-		constexpr double                WEATHER_HOLD_SECONDS = 15.0;
-		constexpr int                   MAX_WEATHER_REAPPLY = 3;
-
 		std::recursive_mutex      g_lock;
 		std::optional<Box>        g_box;
 		std::optional<Trip>       g_trip;
@@ -472,18 +459,22 @@ namespace FTAP::Planner
 			}
 		}
 
-		// Starts the choice only once SKSE Menu Framework has let go of the screen. In 0.0.3 the
-		// trip could start while the framework was still closing its window, which may be what
-		// sometimes left a blank screen instead of the loading screen.
-		void ExecuteWhenReleased(const Choice& a_choice, int a_frames)
+		// A choice waiting for SKSE Menu Framework to let go of the screen (UI thread). Checked
+		// once per map frame by the map hook below, never by a task that queues itself again.
+		std::optional<Choice> g_pendingChoice;
+		int                   g_pendingFrames{ 0 };
+		constexpr int         MAX_PENDING_FRAMES = 120;  // about two seconds
+
+		void ExecuteOrWait(const Choice& a_choice)
 		{
-			constexpr int MAX_FRAMES = 120;  // about two seconds
-			if (!Panel::IsReleased() && a_frames < MAX_FRAMES) {
-				SKSE::GetTaskInterface()->AddUITask([a_choice, a_frames]() { ExecuteWhenReleased(a_choice, a_frames + 1); });
+			if (Panel::IsReleased()) {
+				Execute(a_choice);
 				return;
 			}
-			logs::info("SKSE Menu Framework released the screen after {} frame(s){}", a_frames, a_frames >= MAX_FRAMES ? " (gave up waiting)" : "");
-			Execute(a_choice);
+			logs::info("Waiting for SKSE Menu Framework to let go of the screen before carrying out the choice");
+			std::lock_guard guard{ g_lock };
+			g_pendingChoice = a_choice;
+			g_pendingFrames = 0;
 		}
 
 		void DropBox(std::string_view a_why)
@@ -587,32 +578,6 @@ namespace FTAP::Planner
 				rawIsWholeDays ? "" : "; day counter not as expected");
 		}
 
-		void RunFollowUp(FollowUp a_state)
-		{
-			try {
-				const double seconds = SecondsSince(a_state.start);
-				if (a_state.weather && seconds < WEATHER_HOLD_SECONDS && a_state.reapplied < MAX_WEATHER_REAPPLY) {
-					if (const auto current = Weather::Current(); current != a_state.weather) {
-						++a_state.reapplied;
-						logs::info("[{:.1f} s after arrival] The game replaced the weather with {}; applying {} again", seconds,
-							Weather::Describe(current), Weather::Describe(a_state.weather));
-						Weather::Apply(a_state.weather);
-						std::lock_guard guard{ g_lock };
-						g_lastTrip.push_back(std::format("Weather: the game replaced it {:.1f} s after arrival; applied again", seconds));
-					}
-				}
-				while (a_state.nextLog < FOLLOW_UP_LOG_SECONDS.size() && seconds >= FOLLOW_UP_LOG_SECONDS[a_state.nextLog]) {
-					LogState(std::format("{:.0f} s after arrival", FOLLOW_UP_LOG_SECONDS[a_state.nextLog]));
-					++a_state.nextLog;
-				}
-				if (a_state.nextLog < FOLLOW_UP_LOG_SECONDS.size()) {
-					SKSE::GetTaskInterface()->AddTask([a_state]() { RunFollowUp(a_state); });
-				}
-			} catch (...) {
-				logs::error("Arrival follow-up failed");
-			}
-		}
-
 		// Runs once the loading screen has closed: moves the clock (Later) and sets the weather.
 		void RunArrivalJob()
 		{
@@ -639,7 +604,6 @@ namespace FTAP::Planner
 				g_lastTrip.push_back(std::format("Arrival vs target after that: {}", Hours(finalDifference)));
 			}
 
-			RE::TESWeather* hold = nullptr;
 			if (job->weather != Weather::Choice::kNatural) {
 				if (settings->logWeathers) {
 					Weather::LogRegionsHere();
@@ -650,15 +614,19 @@ namespace FTAP::Planner
 					g_lastTrip.push_back(std::format("Weather {}: not applied - {}", Weather::Name(job->weather), pick.reason));
 				} else {
 					Weather::Apply(pick.weather);
-					hold = pick.weather;
 					logs::info("{}Weather {} applied: {} {}; current weather now {}", Stamp(), Weather::Name(job->weather),
 						Weather::Describe(pick.weather), pick.reason, Weather::Describe(Weather::Current()));
 					g_lastTrip.push_back(std::format("Weather {}: applied - {}", Weather::Name(job->weather), Weather::Describe(pick.weather)));
 				}
 			}
 
-			const FollowUp state{ NowTicks(), hold, 0, 0 };
-			SKSE::GetTaskInterface()->AddTask([state]() { RunFollowUp(state); });
+			LogState("on arrival");
+
+			// Prototypes 0.0.3 and 0.0.4 also checked the clock and weather again 3, 10 and 30 s
+			// later, using a game task that queued itself again until then. The game ran that
+			// task over and over without pausing, which held up one of its own worker threads
+			// for 30 s: the blank screen after the loading screen. Those logs showed the clock
+			// and weather never changed afterwards, so the checks are gone.
 		}
 
 		void OnFastTravelEnd(float a_reportedHours)
@@ -719,7 +687,7 @@ namespace FTAP::Planner
 			g_arrivalJob = job;
 			if (!g_loadingOpen) {
 				// The loading screen is already over (or never showed): do it now.
-				SKSE::GetTaskInterface()->AddTask([]() { RunArrivalJob(); });
+				SKSE::GetTaskInterface()->AddUITask([]() { RunArrivalJob(); });
 			}
 			// Otherwise it runs when the loading screen closes.
 		}
@@ -804,6 +772,10 @@ namespace FTAP::Planner
 			static void OnMapClosed()
 			{
 				g_mapOpen = false;
+				{
+					std::lock_guard guard{ g_lock };
+					g_pendingChoice.reset();
+				}
 				DropBox("the map closed");
 
 				bool confirmed = false;
@@ -884,6 +856,20 @@ namespace FTAP::Planner
 						}
 					}
 
+					std::optional<Choice> ready;
+					{
+						std::lock_guard guard{ g_lock };
+						if (g_pendingChoice && (Panel::IsReleased() || ++g_pendingFrames >= MAX_PENDING_FRAMES)) {
+							ready = g_pendingChoice;
+							g_pendingChoice.reset();
+							logs::info("SKSE Menu Framework let go after {} map frame(s){}", g_pendingFrames,
+								g_pendingFrames >= MAX_PENDING_FRAMES ? " (stopped waiting)" : "");
+						}
+					}
+					if (ready) {
+						Execute(*ready);
+					}
+
 					bool orphaned = false;
 					std::uint64_t serial = 0;
 					{
@@ -922,7 +908,7 @@ namespace FTAP::Planner
 		Panel::Close();
 		SKSE::GetTaskInterface()->AddUITask([a_choice]() {
 			try {
-				ExecuteWhenReleased(a_choice, 0);
+				ExecuteOrWait(a_choice);
 			} catch (const std::exception& e) {
 				logs::error("Carrying out the panel choice failed: {}", e.what());
 			} catch (...) {
@@ -961,6 +947,7 @@ namespace FTAP::Planner
 	{
 		DropBox("a game is loading");
 		std::lock_guard guard{ g_lock };
+		g_pendingChoice.reset();
 		if (g_trip) {
 			RestoreSpeed(*g_trip, "a game is loading");
 			g_trip.reset();

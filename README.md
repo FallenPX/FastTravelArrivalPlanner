@@ -33,11 +33,11 @@ Install the updated Fast Travel Time Info (0.1.4), this plugin and SKSE Menu Fra
 1. **Do the timing options arrive on time?**
    - **1/2**, **1/3**: worked in 0.0.2 (within a minute).
    - **Later** (0.0.3): pick a day and an hour, for example 07:00 three days later. Check the in-game clock on arrival; the status page shows *Arrival vs target after that*.
-   - Because Later now moves the clock directly, also check afterwards: the date and time in the Wait menu, that time keeps running normally, and that a shop or inn still keeps its usual hours. The log records the clock 3, 10 and 30 seconds after arrival (lines starting with `[State`).
+   - Because Later now moves the clock directly, also check afterwards: the date and time in the Wait menu, that time keeps running normally, and that a shop or inn still keeps its usual hours. The log records the clock before and after it moves, and on arrival (lines starting with `[State`).
 2. **Does Instant reach zero hours?** Choose **Instant** and note *Game reported* on the status page.
 3. **Does the chosen weather stay?**
    - In 0.0.2 the weather was always applied after loading: the step queued during loading only ran once the loading screen had closed. 0.0.3 therefore applies it there.
-   - The game may replace it in the first seconds after arrival. 0.0.3 then applies it again (up to three times, during the first 15 seconds) and says so on the status page.
+   - The 0.0.3 and 0.0.4 logs showed the game never replaced the chosen weather in the first 30 seconds, so it is simply applied once on arrival.
 4. **Do the two mods talk to each other?**
    - The status page's first line should say *Connected to Fast Travel Time Info 0.1.4*.
    - After a planned trip, Fast Travel Time Info's log should say *Trip planned by Fast Travel Arrival Planner: not used for calibration*.
@@ -76,6 +76,7 @@ Exactly as for Fast Travel Time Info: double-click **`build.bat`** (option A in 
 
 ## Changelog
 
+- **0.0.5**: Fix: the blank screen after the loading screen, and the longer loading. The checks 3, 10 and 30 seconds after arrival (added in 0.0.3) used a game task that queued itself again; the game ran it over and over without pausing, which held up one of its worker threads for the full 30 seconds. The checks are removed (their logs had shown nothing changes after arrival), and nothing in the planner repeats itself through the game's task queue any more.
 - **0.0.4**:
   - Fix: Later moved the date but not the game's day counter, so the weekday went wrong and day-based timers did not advance. The game rebuilds that counter from whole days every frame, and 0.0.4 moves those whole days too. **Saves made after a Later trip with 0.0.3 have this mismatch; load a save from before it.**
   - Arrival shows 6:00 instead of 5:59.
