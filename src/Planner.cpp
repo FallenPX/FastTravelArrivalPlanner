@@ -52,6 +52,7 @@ namespace FTAP::Planner
 			Timing          timing{ Timing::kNormal };
 			double          estimateHours{ 0.0 };
 			bool            calibrated{ false };
+			bool            hasEstimate{ false };  // Fast Travel Time Info gave an estimate for this trip
 			double          targetHours{ 0.0 };  // hours from departure
 			bool            speedChanged{ false };
 			float           originalMult{ 1.0f };
@@ -312,8 +313,8 @@ namespace FTAP::Planner
 			}
 			Link::Get()->GetTripTo(ref.get(), &box.panel.trip);
 			const auto& trip = box.panel.trip;
-			logs::info("  Destination \"{}\": estimate {} ({}){}", box.panel.destination,
-				trip.valid ? Hours(trip.hours) : "none"s, trip.calibrated ? "calibrated" : "starting guess",
+			logs::info("  Destination \"{}\": estimate {}{}", box.panel.destination,
+				trip.valid ? std::format("{} ({})", Hours(trip.hours), trip.calibrated ? "calibrated" : "approximate") : "none"s,
 				trip.otherWorldspace ? ", in another worldspace" : "");
 
 			// Close the game's box: take its data out of the queue (this destroys the data; the
@@ -350,6 +351,7 @@ namespace FTAP::Planner
 			trip.timing = a_choice.timing;
 			trip.estimateHours = estimate;
 			trip.calibrated = info.calibrated;
+			trip.hasEstimate = info.valid && estimate > 0.0;
 			trip.targetHours = estimate;
 			trip.originPos = PlayerPos();
 			trip.destinationPos = a_box.destinationPos;
@@ -416,8 +418,9 @@ namespace FTAP::Planner
 			}
 
 			logs::info("{}Proceed to \"{}\": timing {}", Stamp(), trip.destination, TimingName(trip.timing));
-			logs::info("{}  FTTI estimate {} ({}), target {}{}{}", Stamp(), Hours(estimate), trip.calibrated ? "calibrated" : "starting guess",
-				Hours(trip.targetHours), trip.speedChanged ? std::format(", fFastTravelSpeedMult {} -> {}", trip.originalMult, trip.setMult) : ""s,
+			logs::info("{}  FTTI estimate {}, target {}{}{}", Stamp(),
+				trip.hasEstimate ? std::format("{} ({})", Hours(estimate), trip.calibrated ? "calibrated" : "approximate") : "none"s,
+				trip.hasEstimate || trip.timing != Timing::kNormal ? Hours(trip.targetHours) : "as the game decides"s, trip.speedChanged ? std::format(", fFastTravelSpeedMult {} -> {}", trip.originalMult, trip.setMult) : ""s,
 				trip.clockTopUp ? ", normal trip then the clock moves forward" : "");
 
 			std::lock_guard guard{ g_lock };
@@ -625,16 +628,23 @@ namespace FTAP::Planner
 
 			std::lock_guard guard{ g_lock };
 			RestoreSpeed(trip, "trip ended");
-			logs::info("{}Fast travel ended: game reports {}, calendar moved {}; target {} -> difference {} ({})", Stamp(),
-				Hours(a_reportedHours), Hours(calendarHours), Hours(trip.targetHours), Hours(difference), TimingName(trip.timing));
+			if (trip.hasEstimate || trip.timing != Timing::kNormal) {
+				logs::info("{}Fast travel ended: game reports {}, calendar moved {}; target {} -> difference {} ({})", Stamp(),
+					Hours(a_reportedHours), Hours(calendarHours), Hours(trip.targetHours), Hours(difference), TimingName(trip.timing));
+			} else {
+				logs::info("{}Fast travel ended: game reports {}, calendar moved {} (no estimate to compare with)", Stamp(),
+					Hours(a_reportedHours), Hours(calendarHours));
+			}
 
 			g_lastTrip = {
 				std::format("Destination: {}", trip.destination),
 				std::format("Timing: {}", TimingName(trip.timing)),
-				std::format("FTTI estimate: {} ({})", Hours(trip.estimateHours), trip.calibrated ? "calibrated" : "starting guess"),
-				std::format("Target: {}", Hours(trip.targetHours)),
+				trip.hasEstimate ? std::format("FTTI estimate: {} ({})", Hours(trip.estimateHours), trip.calibrated ? "calibrated" : "approximate") :
+				                   "FTTI estimate: none"s,
+				std::format("Target: {}", trip.hasEstimate || trip.timing != Timing::kNormal ? Hours(trip.targetHours) : "as the game decides"s),
 				std::format("Game reported: {}; calendar moved: {}", Hours(a_reportedHours), Hours(calendarHours)),
-				std::format("Difference from target after the trip itself: {}", Hours(difference)),
+				trip.hasEstimate || trip.timing != Timing::kNormal ? std::format("Difference from target after the trip itself: {}", Hours(difference)) :
+				                                                     "Difference from target: no estimate to compare with"s,
 			};
 			g_lastArrivalTicks = NowTicks();
 

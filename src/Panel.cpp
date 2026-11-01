@@ -177,7 +177,7 @@ namespace FTAP::Panel
 											"vampirism and survival needs advance, and followers you left waiting may leave.");
 			}
 			if (hasEstimate && !trip.calibrated && g_ui.timing != static_cast<int>(Timing::kNormal)) {
-				ImGuiMCP::TextDisabled("%s", "Fast Travel Time Info is still on its starting guess, so the arrival may be off.");
+				ImGuiMCP::TextDisabled("%s", "The travel time is approximate, so the arrival may be off.");
 			}
 
 			// Buttons

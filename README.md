@@ -10,7 +10,7 @@ Time only ever moves forward. Proceed with untouched settings is exactly a norma
 
 - SKSE64 matching your game version
 - Address Library for SKSE Plugins (All in one)
-- **Fast Travel Time Info 0.1.4 or newer**
+- **Fast Travel Time Info 0.1.4 or newer** (0.1.9 or newer recommended)
 - **SKSE Menu Framework**
 
 Without Fast Travel Time Info 0.1.4+ or SKSE Menu Framework, the planner stays inactive and the game's own box is used.
@@ -26,7 +26,7 @@ Without Fast Travel Time Info 0.1.4+ or SKSE Menu Framework, the planner stays i
 
 For each trip, the **status page** shows the last planned trip: SKSE Menu Framework, then *Fast Travel Arrival Planner*, then *Status*. Full details are in `Documents\My Games\Skyrim Special Edition\SKSE\FastTravelArrivalPlanner.log`.
 
-Already confirmed: all timing options arrive on time (Instant at 0 minutes, 1/3 and 1/2 within a few minutes, Later to the minute, including into a new year); the two mods talk to each other; the panel replaces the box, and Proceed, Cancel and Place Marker work; Solstheim works; loading times are normal.
+Already confirmed: all timing options arrive on time (Instant at 0 minutes, 1/3 and 1/2 within a few minutes, Later to the minute, including into a new year); the two mods talk to each other; the panel replaces the box, and Proceed, Cancel and Place Marker work; Solstheim works; trips to and from the Forgotten Vale and Fort Dawnguard work, with the panel on and off; loading times are normal.
 
 Still open:
 
@@ -37,7 +37,7 @@ Still open:
    - Does the game's own box ever flash briefly before the panel?
    - Does Escape close the panel and return to the map?
    - If you have a controller, can you use the panel with it?
-3. **The Forgotten Vale.** Fast travel to and from it. Try once with `bShowPanel = 0` as well, because the unmodded game is known to hang on a darkened map there sometimes.
+3. **Fort Dawnguard with Fast Travel Time Info 0.1.9.** Trips into and out of it now have an approximate estimate, so the panel offers every option there. Try 1/3 or Later once.
 
 Please send back both log files: `FastTravelArrivalPlanner.log` and `FastTravelTimeInfo.log`.
 
@@ -60,6 +60,7 @@ Exactly as for Fast Travel Time Info: double-click **`build.bat`** (option A in 
 
 ## Changelog
 
+- **0.0.7**: Wording only, for Fast Travel Time Info 0.1.9, which estimates trips into and out of areas such as Fort Dawnguard from their map positions. Such estimates are approximate, so the panel now says "The travel time is approximate" instead of naming FTTI's starting guess. The log no longer reports a "difference" for trips without an estimate.
 - **0.0.6**: The weather options are removed; the planner is about arrival time only. (A weather of choice is better served by tools made for it, and doing it well would need each destination's weather list before travelling.)
 - **0.0.5**: Fix: the blank screen after the loading screen, and the longer loading. The checks 3, 10 and 30 seconds after arrival (added in 0.0.3) used a game task that queued itself again; the game ran it over and over without pausing, which held up one of its worker threads for the full 30 seconds. The checks are removed (their logs had shown nothing changes after arrival), and nothing in the planner repeats itself through the game's task queue any more.
 - **0.0.4**:
