@@ -1,7 +1,6 @@
 #pragma once
 
 #include "FTTI_API.h"
-#include "Weather.h"
 
 namespace FTAP::Planner
 {
@@ -26,7 +25,6 @@ namespace FTAP::Planner
 		FTTI_API::TripInfo                       trip;
 		double                                   nowHour{ 0.0 };     // game hour when the panel opened (time stands still on the map)
 		std::vector<std::pair<int, std::string>> extraButtons;      // the game's other buttons, e.g. Place Marker
-		bool                                     weatherOptions{ true };
 		float                                    minHoursForFaster{ 1.0f };
 	};
 	[[nodiscard]] PanelData GetPanelData();
@@ -43,7 +41,6 @@ namespace FTAP::Planner
 		int             otherIndex{ -1 };    // kOther: which of the game's buttons
 		Timing          timing{ Timing::kNormal };
 		double          laterHours{ 0.0 };   // kLater: arrival, in hours from now
-		Weather::Choice weather{ Weather::Choice::kNatural };
 		std::uint64_t   serial{ 0 };
 	};
 

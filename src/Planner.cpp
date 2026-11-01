@@ -16,8 +16,8 @@
 //    just before Proceed so that the game's own fast travel takes the chosen time, and it
 //    is put back when the trip ends (or the map closes without travelling, or a save loads).
 //    Time therefore only ever moves forward, and the game handles the calendar itself.
-// 4. A chosen weather is applied when the player arrives, from the destination region's own
-//    weather list.
+// 4. Later arrivals are a normal trip; once the loading screen closes, the clock moves forward
+//    to the chosen hour.
 //
 // Prototype: every step writes to FastTravelArrivalPlanner.log so the tests can be read back.
 
@@ -50,7 +50,6 @@ namespace FTAP::Planner
 		{
 			std::string     destination;
 			Timing          timing{ Timing::kNormal };
-			Weather::Choice weather{ Weather::Choice::kNatural };
 			double          estimateHours{ 0.0 };
 			bool            calibrated{ false };
 			double          targetHours{ 0.0 };  // hours from departure
@@ -68,7 +67,6 @@ namespace FTAP::Planner
 		// What still has to happen once the player is in the world again (after the loading screen).
 		struct ArrivalJob
 		{
-			Weather::Choice weather{ Weather::Choice::kNatural };
 			double          clockHours{ 0.0 };  // move the clock forward by this much
 			double          targetHours{ 0.0 };
 			float           startDaysPassed{ 0.0f };
@@ -308,7 +306,6 @@ namespace FTAP::Planner
 			box.destinationPos = ref->GetPosition();
 			box.panel.open = true;
 			box.panel.destination = std::string(marker->fullName && marker->fullName->GetFullName() ? marker->fullName->GetFullName() : "");
-			box.panel.weatherOptions = settings->weatherOptions;
 			box.panel.minHoursForFaster = settings->minHoursForFaster;
 			if (const auto calendar = RE::Calendar::GetSingleton()) {
 				box.panel.nowHour = calendar->GetHour();
@@ -351,7 +348,6 @@ namespace FTAP::Planner
 			Trip trip;
 			trip.destination = a_box.panel.destination;
 			trip.timing = a_choice.timing;
-			trip.weather = settings->weatherOptions ? a_choice.weather : Weather::Choice::kNatural;
 			trip.estimateHours = estimate;
 			trip.calibrated = info.calibrated;
 			trip.targetHours = estimate;
@@ -419,7 +415,7 @@ namespace FTAP::Planner
 				}
 			}
 
-			logs::info("{}Proceed to \"{}\": timing {}, weather {}", Stamp(), trip.destination, TimingName(trip.timing), Weather::Name(trip.weather));
+			logs::info("{}Proceed to \"{}\": timing {}", Stamp(), trip.destination, TimingName(trip.timing));
 			logs::info("{}  FTTI estimate {} ({}), target {}{}{}", Stamp(), Hours(estimate), trip.calibrated ? "calibrated" : "starting guess",
 				Hours(trip.targetHours), trip.speedChanged ? std::format(", fFastTravelSpeedMult {} -> {}", trip.originalMult, trip.setMult) : ""s,
 				trip.clockTopUp ? ", normal trip then the clock moves forward" : "");
@@ -512,9 +508,9 @@ namespace FTAP::Planner
 			}
 			std::array<char, 128> text{};
 			c->GetTimeDateString(text.data(), static_cast<std::uint32_t>(text.size()), true);
-			logs::info("[State: {}] {} | hour {:.3f}, day {}, month {}, year {}, days passed {:.5f} (raw {:.5f}, midnights {}) | weather {}",
+			logs::info("[State: {}] {} | hour {:.3f}, day {}, month {}, year {}, days passed {:.5f} (raw {:.5f}, midnights {})",
 				a_label, text.data(), c->gameHour->value, c->gameDay->value, c->gameMonth->value, c->gameYear->value,
-				c->gameDaysPassed->value, c->rawDaysPassed, c->midnightsPassed, Weather::Describe(Weather::Current()));
+				c->gameDaysPassed->value, c->rawDaysPassed, c->midnightsPassed);
 		}
 
 		// Moves the game clock forward, the way time passes naturally: hour, day, month and year
@@ -578,10 +574,9 @@ namespace FTAP::Planner
 				rawIsWholeDays ? "" : "; day counter not as expected");
 		}
 
-		// Runs once the loading screen has closed: moves the clock (Later) and sets the weather.
+		// Runs once the loading screen has closed: moves the clock for a Later arrival.
 		void RunArrivalJob()
 		{
-			const auto                settings = Settings::Current();
 			std::optional<ArrivalJob> job;
 			{
 				std::lock_guard guard{ g_lock };
@@ -604,29 +599,13 @@ namespace FTAP::Planner
 				g_lastTrip.push_back(std::format("Arrival vs target after that: {}", Hours(finalDifference)));
 			}
 
-			if (job->weather != Weather::Choice::kNatural) {
-				if (settings->logWeathers) {
-					Weather::LogRegionsHere();
-				}
-				const auto pick = Weather::PickHere(job->weather);
-				if (!pick.weather) {
-					logs::info("{}Weather {} not applied: {}", Stamp(), Weather::Name(job->weather), pick.reason);
-					g_lastTrip.push_back(std::format("Weather {}: not applied - {}", Weather::Name(job->weather), pick.reason));
-				} else {
-					Weather::Apply(pick.weather);
-					logs::info("{}Weather {} applied: {} {}; current weather now {}", Stamp(), Weather::Name(job->weather),
-						Weather::Describe(pick.weather), pick.reason, Weather::Describe(Weather::Current()));
-					g_lastTrip.push_back(std::format("Weather {}: applied - {}", Weather::Name(job->weather), Weather::Describe(pick.weather)));
-				}
-			}
-
 			LogState("on arrival");
 
-			// Prototypes 0.0.3 and 0.0.4 also checked the clock and weather again 3, 10 and 30 s
-			// later, using a game task that queued itself again until then. The game ran that
-			// task over and over without pausing, which held up one of its own worker threads
-			// for 30 s: the blank screen after the loading screen. Those logs showed the clock
-			// and weather never changed afterwards, so the checks are gone.
+			// Prototypes 0.0.3 and 0.0.4 also checked the clock again 3, 10 and 30 s later, using a
+			// game task that queued itself again until then. The game ran that task over and over
+			// without pausing, which held up one of its own worker threads for 30 s: the blank
+			// screen after the loading screen. Those logs showed the clock never changed
+			// afterwards, so the checks are gone.
 		}
 
 		void OnFastTravelEnd(float a_reportedHours)
@@ -651,7 +630,7 @@ namespace FTAP::Planner
 
 			g_lastTrip = {
 				std::format("Destination: {}", trip.destination),
-				std::format("Timing: {}, weather: {}", TimingName(trip.timing), Weather::Name(trip.weather)),
+				std::format("Timing: {}", TimingName(trip.timing)),
 				std::format("FTTI estimate: {} ({})", Hours(trip.estimateHours), trip.calibrated ? "calibrated" : "starting guess"),
 				std::format("Target: {}", Hours(trip.targetHours)),
 				std::format("Game reported: {}; calendar moved: {}", Hours(a_reportedHours), Hours(calendarHours)),
@@ -662,12 +641,11 @@ namespace FTAP::Planner
 			// Guard against a different fast travel (a carriage, say) ending a stale plan.
 			const bool ours = trip.confirmed || Clock::now() - trip.proceededAt < TRIP_TIMEOUT;
 			if (!ours) {
-				logs::warn("{}This fast travel does not seem to be the planned one; clock and weather left alone", Stamp());
+				logs::warn("{}This fast travel does not seem to be the planned one; clock left alone", Stamp());
 				g_lastTrip.push_back("Note: this fast travel did not seem to be the planned one");
 				return;
 			}
 			ArrivalJob job;
-			job.weather = trip.weather;
 			job.targetHours = trip.targetHours;
 			job.startDaysPassed = trip.startDaysPassed;
 			job.originPos = trip.originPos;
@@ -681,7 +659,7 @@ namespace FTAP::Planner
 					g_lastTrip.push_back("Clock: not moved - the trip itself already reached the target");
 				}
 			}
-			if (job.weather == Weather::Choice::kNatural && job.clockHours <= 0.0) {
+			if (job.clockHours <= 0.0) {
 				return;
 			}
 			g_arrivalJob = job;
@@ -832,8 +810,6 @@ namespace FTAP::Planner
 				}
 				if (hasJob) {
 					RunArrivalJob();
-				} else if (recent && Settings::Current()->logWeathers) {
-					Weather::LogRegionsHere();  // prototype test 7: record each region's weathers
 				}
 			}
 		};

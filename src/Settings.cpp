@@ -73,8 +73,6 @@ namespace FTAP
 					ReadBool(value, s.enabled);
 				} else if (key == "bshowpanel") {
 					ReadBool(value, s.showPanel);
-				} else if (key == "bweatheroptions") {
-					ReadBool(value, s.weatherOptions);
 				} else if (key == "fminhoursforfaster") {
 					ReadFloat(value, s.minHoursForFaster, 0.0f, 48.0f);
 				} else if (key == "blaterbyclock") {
@@ -83,8 +81,6 @@ namespace FTAP
 					ReadBool(value, s.skipAfterConversation);
 				} else if (key == "fconversationseconds") {
 					ReadFloat(value, s.conversationSeconds, 0.0f, 30.0f);
-				} else if (key == "blogweathers") {
-					ReadBool(value, s.logWeathers);
 				}
 			}
 			return s;
@@ -100,9 +96,9 @@ namespace FTAP
 	void Settings::Reload()
 	{
 		auto loaded = std::make_shared<const Settings>(LoadFromIni());
-		logs::info("Settings: enabled={} panel={} weather={} minHoursForFaster={:.2f} laterByClock={} skipAfterConversation={} ({:.1f} s) logWeathers={}",
-			loaded->enabled, loaded->showPanel, loaded->weatherOptions, loaded->minHoursForFaster, loaded->laterByClock,
-			loaded->skipAfterConversation, loaded->conversationSeconds, loaded->logWeathers);
+		logs::info("Settings: enabled={} panel={} minHoursForFaster={:.2f} laterByClock={} skipAfterConversation={} ({:.1f} s)",
+			loaded->enabled, loaded->showPanel, loaded->minHoursForFaster, loaded->laterByClock,
+			loaded->skipAfterConversation, loaded->conversationSeconds);
 		std::lock_guard guard{ g_lock };
 		g_current = std::move(loaded);
 	}

@@ -5,7 +5,7 @@
 set_xmakever("3.0.0")
 
 set_project("FastTravelArrivalPlanner")
-set_version("0.0.5")
+set_version("0.0.6")
 set_license("GPL-3.0")
 set_arch("x64")
 set_languages("c++23")
@@ -28,7 +28,7 @@ target("FastTravelArrivalPlanner", function()
     add_rules("commonlibsse-ng.plugin", {
         name = "FastTravelArrivalPlanner",
         author = "Yulian",
-        description = "Choose arrival time and weather for world-map fast travel (requires Fast Travel Time Info)"
+        description = "Choose your arrival time for world-map fast travel (requires Fast Travel Time Info)"
     })
 
     add_files("src/**.cpp")

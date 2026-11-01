@@ -23,7 +23,6 @@ namespace FTAP::Panel
 	namespace
 	{
 		using Planner::Timing;
-		using Weather::Choice;
 
 		MENU_WINDOW       g_window = nullptr;
 		std::atomic<bool> g_available{ false };
@@ -33,7 +32,6 @@ namespace FTAP::Panel
 		{
 			std::uint64_t serial{ 0 };
 			int           timing{ static_cast<int>(Timing::kNormal) };
-			int           weather{ static_cast<int>(Choice::kNatural) };
 			int           laterDay{ 0 };
 			int           laterHour{ 0 };
 		};
@@ -94,7 +92,6 @@ namespace FTAP::Panel
 			choice.otherIndex = a_otherIndex;
 			choice.timing = static_cast<Timing>(g_ui.timing);
 			choice.laterHours = a_laterHours;
-			choice.weather = static_cast<Choice>(g_ui.weather);
 			choice.serial = a_data.serial;
 			Planner::Submit(choice);
 		}
@@ -171,26 +168,9 @@ namespace FTAP::Panel
 				break;
 			}
 
-			// Weather
-			if (a_data.weatherOptions) {
-				ImGuiMCP::SeparatorText("Weather");
-				for (int i = 0; i < Weather::CHOICE_COUNT; ++i) {
-					if (i > 0) {
-						ImGuiMCP::SameLine();
-					}
-					ImGuiMCP::RadioButton(Weather::Name(static_cast<Choice>(i)), &g_ui.weather, i);
-				}
-				ImGuiMCP::TextDisabled("%s", "If the destination has no weather of that kind, it stays natural.");
-			} else {
-				g_ui.weather = static_cast<int>(Choice::kNatural);
-			}
-
 			// Result
 			ImGuiMCP::Separator();
-			auto arrival = hasEstimate || g_ui.timing == static_cast<int>(Timing::kInstant) ? Link::FormatArrival(arrivalHours) : std::string("as the game decides");
-			if (g_ui.weather != static_cast<int>(Choice::kNatural)) {
-				arrival += std::format(" ({})", Weather::Name(static_cast<Choice>(g_ui.weather)));
-			}
+			const auto arrival = hasEstimate || g_ui.timing == static_cast<int>(Timing::kInstant) ? Link::FormatArrival(arrivalHours) : std::string("as the game decides");
 			ImGuiMCP::Text("Arrival: %s", arrival.c_str());
 			if (hasEstimate && g_ui.timing == static_cast<int>(Timing::kLater) && laterHours - trip.hours > 24.0) {
 				ImGuiMCP::TextWrapped("%s", "More than a day after the normal arrival. Time passes as if you waited: timed effects end, "
@@ -268,9 +248,9 @@ namespace FTAP::Panel
 				const auto settings = Settings::Current();
 				ImGuiMCP::SeparatorText("Prototype status");
 				ImGuiMCP::TextWrapped("%s", Link::Describe().c_str());
-				ImGuiMCP::Text("Panel: %s   Weather options: %s   Faster options from: %.2f h",
-					settings->enabled && settings->showPanel ? "on" : "off", settings->weatherOptions ? "on" : "off",
-					static_cast<double>(settings->minHoursForFaster));
+				ImGuiMCP::Text("Panel: %s   Faster options from: %.2f h   Later: %s",
+					settings->enabled && settings->showPanel ? "on" : "off", static_cast<double>(settings->minHoursForFaster),
+					settings->laterByClock ? "normal trip, then the clock moves" : "stretched trip");
 
 				ImGuiMCP::SeparatorText("Last planned trip");
 				const auto lines = Planner::LastTripLines();

@@ -1,13 +1,10 @@
 # Fast Travel Arrival Planner (prototype)
 
-An SKSE plugin for Skyrim Special Edition / Anniversary Edition and an add-on for **Fast Travel Time Info**. When you click a destination on the world map, an arrival panel opens in place of the game's "Fast travel to ...?" box. There you can choose:
-
-- **When you arrive:** Instant, 1/3 or 1/2 of the normal travel time, the normal ETA, or later (whole hours, up to 30 days after the normal arrival).
-- **The weather on arrival:** Natural, Clear, Cloudy, Rain or Snow.
+An SKSE plugin for Skyrim Special Edition / Anniversary Edition and an add-on for **Fast Travel Time Info**. When you click a destination on the world map, an arrival panel opens in place of the game's "Fast travel to ...?" box. There you choose **when you arrive**: instantly, in 1/3 or 1/2 of the normal travel time, at the normal ETA, or later, at a whole hour up to 30 days after the normal arrival.
 
 Time only ever moves forward. Proceed with untouched settings is exactly a normal fast travel.
 
-**This is a prototype.** It exists to answer the seven test questions below, and it writes every step to its log.
+**This is a prototype.** It writes every step to its log for testing.
 
 ## Requirements
 
@@ -21,39 +18,26 @@ Without Fast Travel Time Info 0.1.4+ or SKSE Menu Framework, the planner stays i
 ## How it works
 
 - **Faster arrivals (Instant, 1/3, 1/2).** Just before the trip, the planner changes the game setting `fFastTravelSpeedMult`, so the game's own fast travel takes the chosen share of its normal time. The setting is put back when the trip ends. If no fast travel follows, it is put back the next time the map opens, or when a save is loaded. Changed game settings are never stored in save files, so a crash cannot leave it changed.
-- **Later arrivals.** The trip itself is normal. When the loading screen closes, the clock moves forward to the chosen hour: hour, day, month, year and the days-passed counter move together, as when time passes naturally. Never backwards. (`bLaterByClock = 0` uses the 0.0.2 method instead.)
-- **Weather** is picked from the destination region's own weather list, by the classification each weather record carries (pleasant, cloudy, rainy, snow). Weathers from DLCs, Creation Club content and weather mods are included automatically. Unclassified weathers, such as ash storms, are never picked but can still occur under Natural. The weather is not locked, so it changes naturally afterwards. Weather held by a quest or script is left alone.
-- **Calibration.** Planned trips are not used for Fast Travel Time Info's calibration.
+- **Later arrivals.** The trip itself is normal. When the loading screen closes, the clock moves forward to the chosen hour: hour, day, month, year and the game's day counter move together, as when time passes naturally. Never backwards.
+- **Calibration.** Faster trips are not used for Fast Travel Time Info's calibration.
 - **Other ways of travelling.** The planner only acts on the confirmation box the world map shows. Carriages and other travel are untouched. A map opened from a conversation is left alone too (`bSkipAfterConversation`).
 
 ## Prototype tests
 
-Install the updated Fast Travel Time Info (0.1.4), this plugin and SKSE Menu Framework, then make a save you can return to. For each test, the **status page** shows the last planned trip: SKSE Menu Framework, then *Fast Travel Arrival Planner*, then *Status*. Full details are in `Documents\My Games\Skyrim Special Edition\SKSE\FastTravelArrivalPlanner.log`.
+For each trip, the **status page** shows the last planned trip: SKSE Menu Framework, then *Fast Travel Arrival Planner*, then *Status*. Full details are in `Documents\My Games\Skyrim Special Edition\SKSE\FastTravelArrivalPlanner.log`.
 
-1. **Do the timing options arrive on time?**
-   - **1/2**, **1/3**: worked in 0.0.2 (within a minute).
-   - **Later** (0.0.3): pick a day and an hour, for example 07:00 three days later. Check the in-game clock on arrival; the status page shows *Arrival vs target after that*.
-   - Because Later now moves the clock directly, also check afterwards: the date and time in the Wait menu, that time keeps running normally, and that a shop or inn still keeps its usual hours. The log records the clock before and after it moves, and on arrival (lines starting with `[State`).
-2. **Does Instant reach zero hours?** Choose **Instant** and note *Game reported* on the status page.
-3. **Does the chosen weather stay?**
-   - In 0.0.2 the weather was always applied after loading: the step queued during loading only ran once the loading screen had closed. 0.0.3 therefore applies it there.
-   - The 0.0.3 and 0.0.4 logs showed the game never replaced the chosen weather in the first 30 seconds, so it is simply applied once on arrival.
-4. **Do the two mods talk to each other?**
-   - The status page's first line should say *Connected to Fast Travel Time Info 0.1.4*.
-   - After a planned trip, Fast Travel Time Info's log should say *Trip planned by Fast Travel Arrival Planner: not used for calibration*.
-5. **Does the planner stay out of other travel?**
+Already confirmed: all timing options arrive on time (Instant at 0 minutes, 1/3 and 1/2 within a few minutes, Later to the minute, including into a new year); the two mods talk to each other; the panel replaces the box, and Proceed, Cancel and Place Marker work; Solstheim works; loading times are normal.
+
+Still open:
+
+1. **Does the planner stay out of other travel?**
    - Take a carriage: no panel should appear.
    - If you use a mod that opens the map from a conversation, check that no panel appears there either. The log says *Map opened from a conversation*.
-6. **Does the panel replace the box properly?**
-   - Click a destination. The panel should open instead of the box. Note whether the game's box flashes briefly first.
-   - Check that the map cannot be clicked behind the panel.
-   - Check that Proceed travels and that Cancel (and Escape) return to the map.
-   - If your box has a Place Marker button, check that it still works.
-   - If you have a controller, try using the panel with it.
-7. **DLC worlds.**
-   - On Solstheim, check that Fast Travel Time Info's estimates and the panel look right, and travel once with a weather choice.
-   - Fast travel to and from the Forgotten Vale. Try once with `bShowPanel = 0` as well, because the unmodded game is known to hang on a darkened map there sometimes.
-   - The log lists each region's weathers on lines starting with `[Weathers]`.
+2. **Panel details.**
+   - Does the game's own box ever flash briefly before the panel?
+   - Does Escape close the panel and return to the map?
+   - If you have a controller, can you use the panel with it?
+3. **The Forgotten Vale.** Fast travel to and from it. Try once with `bShowPanel = 0` as well, because the unmodded game is known to hang on a darkened map there sometimes.
 
 Please send back both log files: `FastTravelArrivalPlanner.log` and `FastTravelTimeInfo.log`.
 
@@ -76,6 +60,7 @@ Exactly as for Fast Travel Time Info: double-click **`build.bat`** (option A in 
 
 ## Changelog
 
+- **0.0.6**: The weather options are removed; the planner is about arrival time only. (A weather of choice is better served by tools made for it, and doing it well would need each destination's weather list before travelling.)
 - **0.0.5**: Fix: the blank screen after the loading screen, and the longer loading. The checks 3, 10 and 30 seconds after arrival (added in 0.0.3) used a game task that queued itself again; the game ran it over and over without pausing, which held up one of its worker threads for the full 30 seconds. The checks are removed (their logs had shown nothing changes after arrival), and nothing in the planner repeats itself through the game's task queue any more.
 - **0.0.4**:
   - Fix: Later moved the date but not the game's day counter, so the weekday went wrong and day-based timers did not advance. The game rebuilds that counter from whole days every frame, and 0.0.4 moves those whole days too. **Saves made after a Later trip with 0.0.3 have this mismatch; load a save from before it.**
