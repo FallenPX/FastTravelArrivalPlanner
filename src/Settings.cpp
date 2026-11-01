@@ -2,22 +2,30 @@
 
 #include "Settings.h"
 
+// Settings are read from the player's own file, which lives outside the mod's folder so that
+// installing an update never replaces it. The INI that comes with the mod holds the defaults
+// and is the template for that file; options a newer version adds are merged in. The INI
+// handling is the same as Fast Travel Time Info's.
+
 namespace FTAP
 {
 	namespace
 	{
-		constexpr auto INI_PATH = "Data/SKSE/Plugins/FastTravelArrivalPlanner.ini"sv;
+		constexpr auto DEFAULTS_PATH = "Data/SKSE/Plugins/FastTravelArrivalPlanner.ini"sv;
+		constexpr auto USER_FILE_NAME = "FastTravelArrivalPlanner.ini"sv;
+		// Lines starting with this describe only the defaults file and are not copied.
+		constexpr auto DEFAULTS_ONLY_MARK = ";!"sv;
 
 		std::mutex                      g_lock;
 		std::shared_ptr<const Settings> g_current = std::make_shared<const Settings>();
 
 		std::string Trim(std::string_view a_str)
 		{
-			const auto first = a_str.find_first_not_of(" \t\r\n\"");
+			const auto first = a_str.find_first_not_of(" \t\r\n");
 			if (first == std::string_view::npos) {
 				return {};
 			}
-			const auto last = a_str.find_last_not_of(" \t\r\n\"");
+			const auto last = a_str.find_last_not_of(" \t\r\n");
 			return std::string(a_str.substr(first, last - first + 1));
 		}
 
@@ -29,61 +37,422 @@ namespace FTAP
 			return a_str;
 		}
 
-		void ReadBool(const std::string& a_value, bool& a_out)
+		// Values may be wrapped in double quotes so that leading/trailing spaces survive,
+		// e.g. sMonthJoiner = " of ".
+		std::string Unquote(std::string a_str)
+		{
+			if (a_str.size() >= 2 && a_str.front() == '"' && a_str.back() == '"') {
+				return a_str.substr(1, a_str.size() - 2);
+			}
+			return a_str;
+		}
+
+		// Position of a ';' or '#' comment that is not inside double quotes, or npos.
+		std::size_t FindComment(std::string_view a_line, std::size_t a_from = 0)
+		{
+			bool inQuotes = false;
+			for (std::size_t i = a_from; i < a_line.size(); ++i) {
+				if (a_line[i] == '"') {
+					inQuotes = !inQuotes;
+				} else if (!inQuotes && (a_line[i] == ';' || a_line[i] == '#')) {
+					return i;
+				}
+			}
+			return std::string_view::npos;
+		}
+
+		bool ToBool(const std::string& a_value, bool a_default)
 		{
 			const auto v = Lower(a_value);
 			if (v == "1" || v == "true" || v == "yes" || v == "on") {
-				a_out = true;
-			} else if (v == "0" || v == "false" || v == "no" || v == "off") {
-				a_out = false;
+				return true;
 			}
+			if (v == "0" || v == "false" || v == "no" || v == "off") {
+				return false;
+			}
+			return a_default;
 		}
 
-		void ReadFloat(const std::string& a_value, float& a_out, float a_min, float a_max)
+		float ToFloat(const std::string& a_value, float a_default)
 		{
 			try {
-				const float v = std::stof(a_value);
-				if (std::isfinite(v)) {
-					a_out = std::clamp(v, a_min, a_max);
-				}
+				return std::stof(a_value);
 			} catch (...) {
+				return a_default;
 			}
 		}
 
-		Settings LoadFromIni()
+		// One INI key: where it lives, how to read it and how to write it.
+		struct Field
 		{
-			Settings      s;
-			std::ifstream file{ std::string(INI_PATH) };
+			std::string_view                                    name;     // as written in the INI
+			std::string_view                                    section;  // without brackets
+			std::function<void(Settings&, const std::string&)> parse;    // raw value, quotes already removed
+			std::function<std::string(const Settings&)>        format;   // value as it should be written
+		};
+
+		Field MakeBool(std::string_view a_name, bool Settings::* a_member, std::string_view a_section = "General")
+		{
+			return Field{
+				a_name, a_section,
+				[a_member](Settings& a_s, const std::string& a_v) { a_s.*a_member = ToBool(a_v, a_s.*a_member); },
+				[a_member](const Settings& a_s) { return std::string(a_s.*a_member ? "1" : "0"); }
+			};
+		}
+
+		// Number held within [a_min, a_max]; an unreadable value keeps the default.
+		Field MakeFloat(std::string_view a_name, float Settings::* a_member, float a_min, float a_max, std::string_view a_section = "General")
+		{
+			return Field{
+				a_name, a_section,
+				[a_member, a_min, a_max](Settings& a_s, const std::string& a_v) {
+					const auto v = ToFloat(a_v, a_s.*a_member);
+					if (std::isfinite(v)) {
+						a_s.*a_member = std::clamp(v, a_min, a_max);
+					}
+				},
+				[a_member](const Settings& a_s) { return std::format("{:g}", a_s.*a_member); }
+			};
+		}
+
+		Field MakeString(std::string_view a_name, std::string Settings::* a_member, std::string_view a_section)
+		{
+			return Field{
+				a_name, a_section,
+				[a_member](Settings& a_s, const std::string& a_v) { a_s.*a_member = a_v; },
+				[a_member](const Settings& a_s) { return "\"" + a_s.*a_member + "\""; }
+			};
+		}
+
+		const std::vector<Field>& Fields()
+		{
+			static const std::vector<Field> fields{
+				MakeBool("bEnabled", &Settings::enabled),
+				MakeBool("bShowPanel", &Settings::showPanel),
+				MakeFloat("fMinHoursForFaster", &Settings::minHoursForFaster, 0.0f, 48.0f),
+				MakeBool("bLaterByClock", &Settings::laterByClock),
+				MakeBool("bSkipAfterConversation", &Settings::skipAfterConversation),
+				MakeFloat("fConversationSeconds", &Settings::conversationSeconds, 0.0f, 30.0f),
+				MakeBool("bMatchMapStyle", &Settings::matchMapStyle, "Panel"),
+				MakeString("sFont", &Settings::font, "Panel"),
+			};
+			return fields;
+		}
+
+		const Field* FindField(const std::string& a_lowerKey)
+		{
+			for (const auto& field : Fields()) {
+				if (Lower(std::string(field.name)) == a_lowerKey) {
+					return &field;
+				}
+			}
+			return nullptr;
+		}
+
+		// An active "key = value" line, split into its parts. Positions refer to the original line.
+		struct KeyLine
+		{
+			std::string key;  // lower case
+			std::string value;
+			std::size_t valueStart{ 0 };
+			std::size_t valueEnd{ 0 };
+		};
+
+		std::optional<KeyLine> ParseKeyLine(const std::string& a_line)
+		{
+			const auto trimmed = Trim(a_line);
+			if (trimmed.empty() || trimmed.front() == ';' || trimmed.front() == '#' || trimmed.front() == '[') {
+				return std::nullopt;
+			}
+			const auto eq = a_line.find('=');
+			if (eq == std::string::npos) {
+				return std::nullopt;
+			}
+			const auto comment = FindComment(a_line);
+			if (comment != std::string::npos && comment < eq) {
+				return std::nullopt;  // the '=' is inside a comment
+			}
+
+			KeyLine result;
+			result.key = Lower(Trim(std::string_view(a_line).substr(0, eq)));
+			if (result.key.empty()) {
+				return std::nullopt;
+			}
+			const auto regionEnd = comment == std::string::npos ? a_line.size() : comment;
+			auto       start = eq + 1;
+			while (start < regionEnd && (a_line[start] == ' ' || a_line[start] == '\t')) {
+				++start;
+			}
+			auto end = regionEnd;
+			while (end > start && (a_line[end - 1] == ' ' || a_line[end - 1] == '\t' || a_line[end - 1] == '\r')) {
+				--end;
+			}
+			result.valueStart = start;
+			result.valueEnd = end;
+			result.value = Unquote(a_line.substr(start, end - start));
+			return result;
+		}
+
+		std::optional<std::string> SectionName(const std::string& a_line)
+		{
+			auto trimmed = Trim(a_line);
+			if (const auto comment = FindComment(trimmed); comment != std::string::npos) {
+				trimmed = Trim(std::string_view(trimmed).substr(0, comment));
+			}
+			if (trimmed.size() >= 2 && trimmed.front() == '[' && trimmed.back() == ']') {
+				return Lower(Trim(std::string_view(trimmed).substr(1, trimmed.size() - 2)));
+			}
+			return std::nullopt;
+		}
+
+		struct IniFile
+		{
+			std::vector<std::string> lines;
+			bool                     crlf{ true };
+			bool                     exists{ false };
+		};
+
+		// Next to the log and the calibration file:
+		// Documents\My Games\Skyrim Special Edition\SKSE\FastTravelArrivalPlanner.ini
+		std::filesystem::path UserPath()
+		{
+			if (auto dir = logs::log_directory()) {
+				return *dir / USER_FILE_NAME;
+			}
+			return std::filesystem::path(DEFAULTS_PATH);  // no Documents folder found: use the mod's INI as before
+		}
+
+		IniFile ReadIni(const std::filesystem::path& a_path)
+		{
+			IniFile       ini;
+			std::ifstream file{ a_path, std::ios::binary };
 			if (!file) {
-				logs::info("{} not found; using defaults", INI_PATH);
-				return s;
+				return ini;
 			}
-			std::string line;
-			while (std::getline(file, line)) {
-				if (const auto comment = line.find_first_of(";#"); comment != std::string::npos) {
-					line.resize(comment);
+			ini.exists = true;
+			bool sawLf = false;
+			bool sawCrLf = false;
+			for (std::string line; std::getline(file, line);) {
+				sawLf = true;
+				if (!line.empty() && line.back() == '\r') {
+					line.pop_back();
+					sawCrLf = true;
 				}
-				const auto eq = line.find('=');
-				if (eq == std::string::npos) {
-					continue;  // section header, blank line or junk
+				ini.lines.push_back(std::move(line));
+			}
+			ini.crlf = sawCrLf || !sawLf;
+			return ini;
+		}
+
+		// Writes in place (not via a temporary file), so a mod manager's hard link to the file
+		// stays intact.
+		bool WriteIni(const std::filesystem::path& a_path, const IniFile& a_ini)
+		{
+			std::error_code ec;
+			if (a_path.has_parent_path()) {
+				std::filesystem::create_directories(a_path.parent_path(), ec);
+			}
+			std::ofstream file{ a_path, std::ios::binary | std::ios::trunc };
+			if (!file) {
+				logs::warn("Could not write {}", a_path.string());
+				return false;
+			}
+			const std::string_view eol = a_ini.crlf ? "\r\n" : "\n";
+			for (const auto& line : a_ini.lines) {
+				file << line << eol;
+			}
+			file.flush();
+			if (!file) {
+				logs::warn("Writing {} failed", a_path.string());
+				return false;
+			}
+			return true;
+		}
+
+		// "; sDayUnit = d": an option the player has commented out on purpose. Only names of
+		// real options count, so ordinary comments that happen to contain '=' are ignored.
+		std::optional<std::string> CommentedKey(const std::string& a_line)
+		{
+			const auto trimmed = Trim(a_line);
+			if (trimmed.empty() || (trimmed.front() != ';' && trimmed.front() != '#')) {
+				return std::nullopt;
+			}
+			const auto start = trimmed.find_first_not_of(";# \t");
+			if (start == std::string::npos) {
+				return std::nullopt;
+			}
+			if (const auto parsed = ParseKeyLine(trimmed.substr(start)); parsed && FindField(parsed->key)) {
+				return parsed->key;
+			}
+			return std::nullopt;
+		}
+
+		// Creates the player's settings file from the defaults the first time, and afterwards
+		// adds any option that a newer version introduced. Nothing the player has set, changed
+		// or commented out is ever touched.
+		void PrepareUserFile()
+		{
+			const auto user = UserPath();
+			const auto defaultsPath = std::filesystem::path(DEFAULTS_PATH);
+			if (user == defaultsPath) {
+				return;
+			}
+			const auto defaults = ReadIni(defaultsPath);
+			auto       mine = ReadIni(user);
+
+			if (!mine.exists) {
+				IniFile created;
+				created.crlf = defaults.exists ? defaults.crlf : true;
+				created.lines = {
+					"; Fast Travel Arrival Planner - your settings",
+					"; This file is yours: installing an update never replaces it. Options that a new",
+					"; version adds are copied in here automatically, with their default values.",
+				};
+				if (defaults.exists) {
+					for (const auto& line : defaults.lines) {
+						if (!Trim(line).starts_with(DEFAULTS_ONLY_MARK)) {
+							created.lines.push_back(line);
+						}
+					}
+				} else {
+					// No defaults file either: write every option with its default value.
+					const Settings           values;
+					std::string              section;
+					for (const auto& field : Fields()) {
+						if (field.section != section) {
+							section = field.section;
+							created.lines.emplace_back();
+							created.lines.push_back(std::format("[{}]", section));
+						}
+						created.lines.push_back(std::format("{} = {}", field.name, field.format(values)));
+					}
 				}
-				const auto key = Lower(Trim(std::string_view(line).substr(0, eq)));
-				const auto value = Trim(std::string_view(line).substr(eq + 1));
-				if (key == "benabled") {
-					ReadBool(value, s.enabled);
-				} else if (key == "bshowpanel") {
-					ReadBool(value, s.showPanel);
-				} else if (key == "fminhoursforfaster") {
-					ReadFloat(value, s.minHoursForFaster, 0.0f, 48.0f);
-				} else if (key == "blaterbyclock") {
-					ReadBool(value, s.laterByClock);
-				} else if (key == "bskipafterconversation") {
-					ReadBool(value, s.skipAfterConversation);
-				} else if (key == "fconversationseconds") {
-					ReadFloat(value, s.conversationSeconds, 0.0f, 30.0f);
+				if (WriteIni(user, created)) {
+					logs::info("Created your settings file {} from the defaults", user.string());
+				}
+				return;
+			}
+			if (!defaults.exists) {
+				return;
+			}
+
+			// What the player's file already mentions: options set, or commented out on purpose.
+			std::set<std::string>              known;
+			std::map<std::string, std::size_t> sectionLastLine;  // lower-case section -> last non-blank line
+			std::string                        section;
+			for (std::size_t i = 0; i < mine.lines.size(); ++i) {
+				const auto& line = mine.lines[i];
+				if (const auto name = SectionName(line)) {
+					section = *name;
+					sectionLastLine[section] = i;
+					continue;
+				}
+				if (!Trim(line).empty()) {
+					sectionLastLine[section] = i;
+				}
+				if (const auto parsed = ParseKeyLine(line)) {
+					known.insert(parsed->key);
+				} else if (const auto key = CommentedKey(line)) {
+					known.insert(*key);
 				}
 			}
-			return s;
+
+			// Options in the defaults that the player's file lacks, each with the comment lines
+			// that explain it.
+			std::map<std::string, std::vector<std::string>> additions;  // section -> lines to add
+			std::map<std::string, std::string>               sectionHeaders;
+			std::vector<std::string>                         sectionOrder;
+			std::vector<std::string>                         addedNames;
+			std::vector<std::string>                         comments;
+			section.clear();
+			for (const auto& line : defaults.lines) {
+				const auto trimmed = Trim(line);
+				if (const auto name = SectionName(line)) {
+					section = *name;
+					sectionHeaders[section] = trimmed;
+					comments.clear();
+					continue;
+				}
+				if (trimmed.empty()) {
+					comments.clear();
+					continue;
+				}
+				if (trimmed.starts_with(DEFAULTS_ONLY_MARK)) {
+					continue;
+				}
+				std::optional<std::string> key;
+				std::string                displayName;
+				if (const auto parsed = ParseKeyLine(line)) {
+					key = parsed->key;
+					displayName = Trim(std::string_view(line).substr(0, line.find('=')));
+				} else {
+					key = CommentedKey(line);
+				}
+				if (!key) {
+					comments.push_back(line);  // explanation for the option that follows
+					continue;
+				}
+				if (!known.contains(*key)) {
+					known.insert(*key);
+					if (!additions.contains(section)) {
+						sectionOrder.push_back(section);
+					}
+					auto& block = additions[section];
+					if (!comments.empty()) {
+						block.emplace_back();  // a blank line before each explained option, as in the defaults
+						block.insert(block.end(), comments.begin(), comments.end());
+					}
+					block.push_back(line);
+					addedNames.push_back(displayName.empty() ? *key : displayName);
+				}
+				comments.clear();
+			}
+			if (additions.empty()) {
+				return;
+			}
+
+			// Into existing sections, last first so earlier positions stay valid.
+			std::vector<std::pair<std::size_t, std::string>> inserts;
+			for (const auto& key : sectionOrder) {
+				if (const auto it = sectionLastLine.find(key); it != sectionLastLine.end() && !key.empty()) {
+					inserts.emplace_back(it->second, key);
+				}
+			}
+			std::ranges::sort(inserts, std::greater{});
+			for (const auto& [after, key] : inserts) {
+				auto& lines = additions[key];
+				if (lines.empty() || !lines.front().empty()) {
+					lines.insert(lines.begin(), std::string{});  // keep a blank line after the existing options
+				}
+				mine.lines.insert(mine.lines.begin() + static_cast<std::ptrdiff_t>(after + 1), lines.begin(), lines.end());
+				additions.erase(key);
+			}
+			// Sections the player's file does not have yet go at the end.
+			for (const auto& key : sectionOrder) {
+				const auto it = additions.find(key);
+				if (it == additions.end()) {
+					continue;
+				}
+				if (!mine.lines.empty() && !Trim(mine.lines.back()).empty()) {
+					mine.lines.emplace_back();
+				}
+				if (!key.empty()) {
+					mine.lines.push_back(sectionHeaders.contains(key) ? sectionHeaders[key] : std::format("[{}]", key));
+				}
+				auto lines = it->second;
+				if (!lines.empty() && lines.front().empty()) {
+					lines.erase(lines.begin());  // no blank line straight after the section header
+				}
+				mine.lines.insert(mine.lines.end(), lines.begin(), lines.end());
+			}
+
+			if (WriteIni(user, mine)) {
+				std::string list;
+				for (const auto& name : addedNames) {
+					list += (list.empty() ? "" : ", ") + name;
+				}
+				logs::info("Added new option(s) to your settings file: {}", list);
+			}
 		}
 	}
 
@@ -93,13 +462,39 @@ namespace FTAP
 		return g_current;
 	}
 
+	std::string Settings::FilePath()
+	{
+		return UserPath().string();
+	}
+
 	void Settings::Reload()
 	{
-		auto loaded = std::make_shared<const Settings>(LoadFromIni());
-		logs::info("Settings: enabled={} panel={} minHoursForFaster={:.2f} laterByClock={} skipAfterConversation={} ({:.1f} s)",
-			loaded->enabled, loaded->showPanel, loaded->minHoursForFaster, loaded->laterByClock,
-			loaded->skipAfterConversation, loaded->conversationSeconds);
+		try {
+			PrepareUserFile();
+		} catch (const std::exception& e) {
+			logs::warn("Could not prepare your settings file: {}", e.what());
+		}
+
+		Settings   loaded;
+		const auto path = UserPath();
+		const auto ini = ReadIni(path);
+		if (ini.exists) {
+			logs::info("Settings file: {}", path.string());
+			for (const auto& line : ini.lines) {
+				if (const auto parsed = ParseKeyLine(line)) {
+					if (const auto field = FindField(parsed->key)) {
+						field->parse(loaded, parsed->value);
+					}
+				}
+			}
+		} else {
+			logs::info("No settings file at {}, using defaults", path.string());
+		}
+		logs::info("Settings: enabled={} panel={} minHoursForFaster={:.2f} laterByClock={} skipAfterConversation={} ({:.1f} s) matchMapStyle={} font=\"{}\"",
+			loaded.enabled, loaded.showPanel, loaded.minHoursForFaster, loaded.laterByClock, loaded.skipAfterConversation,
+			loaded.conversationSeconds, loaded.matchMapStyle, loaded.font);
+		auto next = std::make_shared<const Settings>(std::move(loaded));
 		std::lock_guard guard{ g_lock };
-		g_current = std::move(loaded);
+		g_current = std::move(next);
 	}
 }

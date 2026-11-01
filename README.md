@@ -10,7 +10,7 @@ Time only ever moves forward. Proceed with untouched settings is exactly a norma
 
 - SKSE64 matching your game version
 - Address Library for SKSE Plugins (All in one)
-- **Fast Travel Time Info 0.1.4 or newer** (0.1.9 or newer recommended)
+- **Fast Travel Time Info 0.1.4 or newer** (0.2.0 or newer recommended: the panel then matches the map's flyout)
 - **SKSE Menu Framework**
 
 Without Fast Travel Time Info 0.1.4+ or SKSE Menu Framework, the planner stays inactive and the game's own box is used.
@@ -47,10 +47,12 @@ Exactly as for Fast Travel Time Info: double-click **`build.bat`** (option A in 
 
 ## Settings
 
-`Data\SKSE\Plugins\FastTravelArrivalPlanner.ini`. In this prototype, the page in SKSE Menu Framework is a status page with a *Reload INI* button.
+Your settings live in `Documents\My Games\Skyrim Special Edition\SKSE\FastTravelArrivalPlanner.ini`, so updates never replace them. The plugin creates that file from the defaults (`Data\SKSE\Plugins\FastTravelArrivalPlanner.ini`) the first time, and copies in any option a newer version adds. In this prototype, the page in SKSE Menu Framework is a status page with a *Reload INI* button.
 
 - **`bShowPanel = 0`** brings back the game's own box, in case another interface mod conflicts.
 - **`fMinHoursForFaster`** sets the 1-hour threshold for Instant, 1/3 and 1/2. 0 removes the limit.
+- **`bMatchMapStyle`** (on by default): the panel takes its colours from the map's location flyout, so it follows your interface mod, and its background from Fast Travel Time Info's background settings. 0 uses SKSE Menu Framework's own theme.
+- **`sFont`**: a font by the name SKSE Menu Framework lists in its own settings. Empty means the framework's font.
 
 ## Credits
 
@@ -60,6 +62,11 @@ Exactly as for Fast Travel Time Info: double-click **`build.bat`** (option A in 
 
 ## Changelog
 
+- **0.0.8**:
+  - The panel matches the map's location flyout: no title bar, the flyout's colours and diamond bullets, Fast Travel Time Info's background and corners, and the timing choices as words that light up instead of round buttons. The heading reads "Travel to ..." (with Fast Travel Time Info 0.2.0 or newer; with older versions it uses plain colours).
+  - Settings move to your own file in `Documents\My Games\Skyrim Special Edition\SKSE`, which updates never replace. **Updating from 0.0.7:** if you changed anything in `Data\SKSE\Plugins\FastTravelArrivalPlanner.ini` (such as `bShowPanel`), set it again in the new file after the first start.
+  - New options `bMatchMapStyle` and `sFont`.
+  - Clicks and keys are ignored for the first 0.3 seconds after the panel opens, so the second click of a double-click cannot press a button. The log names what cancelled the panel (button, Escape or controller).
 - **0.0.7**: Wording only, for Fast Travel Time Info 0.1.9, which estimates trips into and out of areas such as Fort Dawnguard from their map positions. Such estimates are approximate, so the panel now says "The travel time is approximate" instead of naming FTTI's starting guess. The log no longer reports a "difference" for trips without an estimate.
 - **0.0.6**: The weather options are removed; the planner is about arrival time only. (A weather of choice is better served by tools made for it, and doing it well would need each destination's weather list before travelling.)
 - **0.0.5**: Fix: the blank screen after the loading screen, and the longer loading. The checks 3, 10 and 30 seconds after arrival (added in 0.0.3) used a game task that queued itself again; the game ran it over and over without pausing, which held up one of its worker threads for the full 30 seconds. The checks are removed (their logs had shown nothing changes after arrival), and nothing in the planner repeats itself through the game's task queue any more.

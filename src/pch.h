@@ -16,7 +16,9 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <cstddef>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>

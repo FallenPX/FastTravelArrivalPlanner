@@ -2,7 +2,8 @@
 
 namespace FTAP
 {
-	// User options, read from Data/SKSE/Plugins/FastTravelArrivalPlanner.ini.
+	// User options, read from the player's own settings file (see FilePath), which is created
+	// from Data/SKSE/Plugins/FastTravelArrivalPlanner.ini and survives updates.
 	// Every value has a safe default, so a missing or partial INI is fine.
 	// The live settings are an immutable snapshot swapped as a whole, so the panel
 	// (render thread) and the planner (UI and main threads) can read them at any time.
@@ -14,8 +15,11 @@ namespace FTAP
 		bool  laterByClock{ true };            // Later: normal trip, then the clock moves forward (0 = stretch the trip, as in 0.0.2)
 		bool  skipAfterConversation{ true };   // map opened from a conversation: leave it to the game
 		float conversationSeconds{ 2.0f };     // "right after a conversation" window
+		bool  matchMapStyle{ true };           // panel colours and background follow the map's flyout
+		std::string font;                      // SKSE Menu Framework font for the panel ("" = the framework's own)
 
 		[[nodiscard]] static std::shared_ptr<const Settings> Current();
 		static void                                         Reload();
+		[[nodiscard]] static std::string                    FilePath();
 	};
 }

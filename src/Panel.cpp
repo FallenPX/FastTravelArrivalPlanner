@@ -27,16 +27,6 @@ namespace FTAP::Panel
 		MENU_WINDOW       g_window = nullptr;
 		std::atomic<bool> g_available{ false };
 
-		// Panel state (render thread only), reset whenever a new panel opens.
-		struct UiState
-		{
-			std::uint64_t serial{ 0 };
-			int           timing{ static_cast<int>(Timing::kNormal) };
-			int           laterDay{ 0 };
-			int           laterHour{ 0 };
-		};
-		UiState g_ui;
-
 		// Later arrivals, in whole hours. Times are counted from today's midnight; the day is
 		// counted from the day of the normal arrival.
 		struct LaterRange
@@ -74,15 +64,163 @@ namespace FTAP::Panel
 			}
 		}
 
-		bool Radio(const char* a_label, int* a_value, int a_option, bool a_enabled, const char* a_disabledReason)
+		// ---- Look: matches the map's location flyout (colours from Fast Travel Time Info)
+
+		struct Look
 		{
-			ImGuiMCP::BeginDisabled(!a_enabled);
-			const bool changed = ImGuiMCP::RadioButton(a_label, a_value, a_option);
-			ImGuiMCP::EndDisabled();
-			if (!a_enabled && a_disabledReason && ImGuiMCP::IsItemHovered(ImGuiMCP::ImGuiHoveredFlags_AllowWhenDisabled)) {
-				ImGuiMCP::SetTooltip("%s", a_disabledReason);
+			bool             match{ false };  // false: SKSE Menu Framework's own theme
+			ImGuiMCP::ImVec4 title{ 1, 1, 1, 1 };
+			ImGuiMCP::ImVec4 label{ 0.73f, 0.73f, 0.73f, 1 };
+			ImGuiMCP::ImVec4 value{ 1, 1, 1, 1 };
+			ImGuiMCP::ImVec4 background{ 0, 0, 0, 0.6f };
+			float            rounding{ 4.5f };  // screen pixels
+		};
+
+		// Panel state (render thread only), reset whenever a new panel opens.
+		struct UiState
+		{
+			std::uint64_t serial{ 0 };
+			int           timing{ static_cast<int>(Timing::kNormal) };
+			int           laterDay{ 0 };
+			int           laterHour{ 0 };
+			double        openedAt{ 0.0 };  // ImGui time
+			Look          look;
+		};
+		UiState g_ui;
+
+		ImGuiMCP::ImVec4 Rgb(std::uint32_t a_rgb, float a_alpha = 1.0f)
+		{
+			return { ((a_rgb >> 16) & 0xFF) / 255.0f, ((a_rgb >> 8) & 0xFF) / 255.0f, (a_rgb & 0xFF) / 255.0f, a_alpha };
+		}
+
+		ImGuiMCP::ImVec4 WithAlpha(ImGuiMCP::ImVec4 a_color, float a_alpha)
+		{
+			a_color.w = a_alpha;
+			return a_color;
+		}
+
+		Look MakeLook()
+		{
+			Look look;
+			look.match = Settings::Current()->matchMapStyle;
+			if (!look.match) {
+				return look;
 			}
-			return changed;
+			FTTI_API::FlyoutStyle style;  // defaults when FTTI is older than 0.2.0
+			if (Link::GetFlyoutStyle(style) && !style.colorsKnown) {
+				logs::info("Panel: the map flyout's colours are not known yet; using defaults");
+			}
+			look.title = Rgb(style.titleColor);
+			look.label = Rgb(style.labelColor);
+			look.value = Rgb(style.valueColor);
+			// The panel holds controls, so it never gets fainter than half opaque.
+			const float opacity = style.background ? (std::max)(style.backgroundOpacity, 0.5f) : 0.75f;
+			look.background = Rgb(style.backgroundColor, opacity);
+			// FTTI's corner radius is in the map's 1280 x 720 layout; the panel draws in screen pixels.
+			float scale = 1.5f;
+			if (const auto viewport = ImGuiMCP::GetMainViewport(); viewport && viewport->Size.y > 0.0f) {
+				scale = viewport->Size.y / 720.0f;
+			}
+			look.rounding = style.cornerRadius * scale;
+			return look;
+		}
+
+		// Pushes the panel's colours and spacing; returns how many of each to pop.
+		std::pair<int, int> PushLook(const Look& a_look)
+		{
+			if (!a_look.match) {
+				return { 0, 0 };
+			}
+			using namespace ImGuiMCP;
+			const auto& l = a_look.label;
+			const std::array<std::pair<ImGuiCol, ImVec4>, 20> colors{ {
+				{ ImGuiCol_WindowBg, a_look.background },
+				{ ImGuiCol_PopupBg, WithAlpha(a_look.background, (std::max)(a_look.background.w, 0.92f)) },
+				{ ImGuiCol_Border, WithAlpha(l, 0.35f) },
+				{ ImGuiCol_Text, a_look.value },
+				{ ImGuiCol_TextDisabled, WithAlpha(l, 0.55f) },
+				{ ImGuiCol_FrameBg, WithAlpha(l, 0.15f) },
+				{ ImGuiCol_FrameBgHovered, WithAlpha(l, 0.25f) },
+				{ ImGuiCol_FrameBgActive, WithAlpha(l, 0.35f) },
+				{ ImGuiCol_SliderGrab, WithAlpha(l, 0.9f) },
+				{ ImGuiCol_SliderGrabActive, a_look.title },
+				{ ImGuiCol_CheckMark, a_look.title },
+				{ ImGuiCol_Button, WithAlpha(l, 0.18f) },
+				{ ImGuiCol_ButtonHovered, WithAlpha(l, 0.32f) },
+				{ ImGuiCol_ButtonActive, WithAlpha(l, 0.45f) },
+				{ ImGuiCol_Header, WithAlpha(l, 0.25f) },
+				{ ImGuiCol_HeaderHovered, WithAlpha(l, 0.35f) },
+				{ ImGuiCol_HeaderActive, WithAlpha(l, 0.45f) },
+				{ ImGuiCol_Separator, WithAlpha(l, 0.4f) },
+				{ ImGuiCol_SeparatorHovered, WithAlpha(l, 0.4f) },
+				{ ImGuiCol_SeparatorActive, WithAlpha(l, 0.4f) },
+			} };
+			for (const auto& [index, color] : colors) {
+				PushStyleColor(index, color);
+			}
+			const float pad = GetFontSize() * 0.5f;
+			PushStyleVar(ImGuiStyleVar_WindowRounding, a_look.rounding);
+			PushStyleVar(ImGuiStyleVar_PopupRounding, a_look.rounding);
+			PushStyleVar(ImGuiStyleVar_FrameRounding, a_look.rounding * 0.66f);
+			PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+			PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
+			PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{ pad * 1.4f, pad });
+			return { static_cast<int>(colors.size()), 6 };
+		}
+
+		// The flyout's diamond bullet, drawn (the game's font may not have the character).
+		void Diamond(const Look& a_look)
+		{
+			using namespace ImGuiMCP;
+			const float  size = GetFontSize();
+			const float  r = size * 0.16f;
+			const auto   pos = GetCursorScreenPos();
+			const ImVec2 c{ pos.x + r + size * 0.05f, pos.y + size * 0.52f };
+			ImDrawListManager::AddQuadFilled(GetWindowDrawList(), ImVec2{ c.x, c.y - r * 1.35f }, ImVec2{ c.x + r, c.y },
+				ImVec2{ c.x, c.y + r * 1.35f }, ImVec2{ c.x - r, c.y }, GetColorU32(a_look.title));
+			Dummy(ImVec2{ r * 2.0f + size * 0.15f, size });
+			SameLine(0.0f, size * 0.2f);
+		}
+
+		// "Travel time:  2 h 55 min", as the flyout shows it.
+		void Row(const Look& a_look, const char* a_label, const std::string& a_value)
+		{
+			if (!a_look.match) {
+				ImGuiMCP::Text("%s %s", a_label, a_value.c_str());
+				return;
+			}
+			Diamond(a_look);
+			ImGuiMCP::TextColored(a_look.label, "%s", a_label);
+			ImGuiMCP::SameLine(0.0f, ImGuiMCP::GetFontSize() * 0.4f);
+			ImGuiMCP::TextColored(a_look.value, "%s", a_value.c_str());
+		}
+
+		// One timing choice: a word that lights up when chosen, as in SkyUI's category bars.
+		bool Toggle(const Look& a_look, const char* a_label, int* a_value, int a_option, bool a_enabled, const char* a_disabledReason)
+		{
+			using namespace ImGuiMCP;
+			const bool selected = *a_value == a_option;
+			BeginDisabled(!a_enabled);
+			if (a_look.match) {
+				PushStyleColor(ImGuiCol_Text, selected ? a_look.title : a_look.label);
+			}
+			const auto  text = CalcTextSize(a_label, nullptr, true);
+			const float pad = GetFontSize() * 0.45f;
+			PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2{ 0.5f, 0.5f });
+			const bool clicked = Selectable(a_label, selected, ImGuiSelectableFlags_None, ImVec2{ text.x + pad * 2.0f, 0.0f });
+			PopStyleVar();
+			if (a_look.match) {
+				PopStyleColor();
+			}
+			EndDisabled();
+			if (!a_enabled && a_disabledReason && IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+				SetTooltip("%s", a_disabledReason);
+			}
+			if (clicked && a_enabled) {
+				*a_value = a_option;
+				return true;
+			}
+			return false;
 		}
 
 		void Submit(Planner::Choice::Action a_action, const Planner::PanelData& a_data, double a_laterHours, int a_otherIndex = -1)
@@ -96,25 +234,52 @@ namespace FTAP::Panel
 			Planner::Submit(choice);
 		}
 
-		void RenderPanelContents(const Planner::PanelData& a_data)
+		// Clicks and keys are ignored this soon after the panel opens, so the second click of a
+		// double-click on the map (or a key still held) cannot press one of its buttons.
+		constexpr double INPUT_GUARD_SECONDS = 0.3;
+
+		bool Ready(const char* a_what)
+		{
+			const double age = ImGuiMCP::GetTime() - g_ui.openedAt;
+			if (age >= INPUT_GUARD_SECONDS) {
+				return true;
+			}
+			logs::info("Panel: {} ignored, {:.0f} ms after the panel opened", a_what, age * 1000.0);
+			return false;
+		}
+
+		void RenderPanelContents(const Planner::PanelData& a_data, const Look& a_look)
 		{
 			const auto& trip = a_data.trip;
 			const bool  hasEstimate = trip.valid && trip.hours > 0.0;
 			const bool  fasterAllowed = hasEstimate && (a_data.minHoursForFaster <= 0.0f || trip.hours >= a_data.minHoursForFaster);
 			const auto  fasterReason = std::format("Needs a travel time of at least {}.", Link::FormatDuration(a_data.minHoursForFaster, false));
 
-			// Normal trip
+			// Heading and the normal trip
+			const auto heading = std::format("Travel to {}", a_data.destination);
+			if (a_look.match) {
+				ImGuiMCP::TextColored(a_look.title, "%s", heading.c_str());
+			} else {
+				ImGuiMCP::Text("%s", heading.c_str());
+			}
+			ImGuiMCP::Separator();
 			if (hasEstimate) {
-				ImGuiMCP::Text("Travel time: %s", Link::FormatDuration(trip.hours, !trip.calibrated).c_str());
-				ImGuiMCP::Text("Normal arrival: %s", Link::FormatArrival(trip.hours).c_str());
+				Row(a_look, "Travel time:", Link::FormatDuration(trip.hours, !trip.calibrated));
+				Row(a_look, "Normal arrival:", Link::FormatArrival(trip.hours));
 			} else if (trip.otherWorldspace) {
-				ImGuiMCP::TextWrapped("%s", "No estimate: the destination is in another worldspace. Only a normal trip is available.");
+				ImGuiMCP::TextWrapped("%s", "No estimate for a trip into this area. Only a normal trip is available.");
 			} else {
 				ImGuiMCP::TextWrapped("%s", "No estimate for this trip. Only a normal trip is available.");
 			}
 
 			// Timing
+			if (a_look.match) {
+				ImGuiMCP::PushStyleColor(ImGuiMCP::ImGuiCol_Text, a_look.label);
+			}
 			ImGuiMCP::SeparatorText("Arrival");
+			if (a_look.match) {
+				ImGuiMCP::PopStyleColor();
+			}
 			if (!hasEstimate) {
 				g_ui.timing = static_cast<int>(Timing::kNormal);
 			} else if (!fasterAllowed && g_ui.timing < static_cast<int>(Timing::kNormal)) {
@@ -122,15 +287,15 @@ namespace FTAP::Panel
 			}
 			const char* noEstimate = "No estimate for this trip.";
 			const char* fasterWhy = hasEstimate ? fasterReason.c_str() : noEstimate;
-			Radio("Instant", &g_ui.timing, static_cast<int>(Timing::kInstant), fasterAllowed, fasterWhy);
+			Toggle(a_look, "Instant", &g_ui.timing, static_cast<int>(Timing::kInstant), fasterAllowed, fasterWhy);
 			ImGuiMCP::SameLine();
-			Radio("1/3", &g_ui.timing, static_cast<int>(Timing::kThird), fasterAllowed, fasterWhy);
+			Toggle(a_look, "1/3", &g_ui.timing, static_cast<int>(Timing::kThird), fasterAllowed, fasterWhy);
 			ImGuiMCP::SameLine();
-			Radio("1/2", &g_ui.timing, static_cast<int>(Timing::kHalf), fasterAllowed, fasterWhy);
+			Toggle(a_look, "1/2", &g_ui.timing, static_cast<int>(Timing::kHalf), fasterAllowed, fasterWhy);
 			ImGuiMCP::SameLine();
-			Radio("Normal ETA", &g_ui.timing, static_cast<int>(Timing::kNormal), true, nullptr);
+			Toggle(a_look, "Normal ETA", &g_ui.timing, static_cast<int>(Timing::kNormal), true, nullptr);
 			ImGuiMCP::SameLine();
-			Radio("Later", &g_ui.timing, static_cast<int>(Timing::kLater), hasEstimate, noEstimate);
+			Toggle(a_look, "Later", &g_ui.timing, static_cast<int>(Timing::kLater), hasEstimate, noEstimate);
 
 			double arrivalHours = hasEstimate ? trip.hours : 0.0;
 			double laterHours = 0.0;
@@ -146,9 +311,10 @@ namespace FTAP::Panel
 				break;
 			case Timing::kLater:
 				{
-					const auto range = MakeRange(a_data.nowHour, trip.hours);
+					const auto  range = MakeRange(a_data.nowHour, trip.hours);
+					const float width = ImGuiMCP::GetFontSize() * 13.0f;
 					g_ui.laterDay = std::clamp(g_ui.laterDay, range.dayMin, range.dayMax);
-					ImGuiMCP::SetNextItemWidth(260.0f);
+					ImGuiMCP::SetNextItemWidth(width);
 					ImGuiMCP::SliderInt("Day##later", &g_ui.laterDay, range.dayMin, range.dayMax,
 						g_ui.laterDay == 0 ? "Same day as the normal arrival" : "+%d day(s)");
 					Tooltip("Days after the day of the normal arrival (up to 30). Ctrl+click to type a number.");
@@ -156,7 +322,7 @@ namespace FTAP::Panel
 					const int hourMin = range.HourMin(g_ui.laterDay);
 					const int hourMax = (std::max)(hourMin, range.HourMax(g_ui.laterDay));
 					g_ui.laterHour = std::clamp(g_ui.laterHour, hourMin, hourMax);
-					ImGuiMCP::SetNextItemWidth(260.0f);
+					ImGuiMCP::SetNextItemWidth(width);
 					ImGuiMCP::SliderInt("Hour##later", &g_ui.laterHour, hourMin, hourMax, "%02d:00");
 					Tooltip("Arrival hour on that day. Later arrivals are whole hours.");
 					g_ui.laterHour = std::clamp(g_ui.laterHour, hourMin, hourMax);
@@ -171,7 +337,7 @@ namespace FTAP::Panel
 			// Result
 			ImGuiMCP::Separator();
 			const auto arrival = hasEstimate || g_ui.timing == static_cast<int>(Timing::kInstant) ? Link::FormatArrival(arrivalHours) : std::string("as the game decides");
-			ImGuiMCP::Text("Arrival: %s", arrival.c_str());
+			Row(a_look, "Arrival:", arrival);
 			if (hasEstimate && g_ui.timing == static_cast<int>(Timing::kLater) && laterHours - trip.hours > 24.0) {
 				ImGuiMCP::TextWrapped("%s", "More than a day after the normal arrival. Time passes as if you waited: timed effects end, "
 											"vampirism and survival needs advance, and followers you left waiting may leave.");
@@ -182,21 +348,29 @@ namespace FTAP::Panel
 
 			// Buttons
 			ImGuiMCP::Spacing();
-			if (ImGuiMCP::Button("Proceed")) {
+			if (ImGuiMCP::Button("Proceed") && Ready("Proceed")) {
 				Submit(Planner::Choice::Action::kProceed, a_data, laterHours);
 				return;
 			}
 			for (const auto& [index, text] : a_data.extraButtons) {
 				ImGuiMCP::SameLine();
 				const auto label = std::format("{}##extra{}", text, index);
-				if (ImGuiMCP::Button(label.c_str())) {
+				if (ImGuiMCP::Button(label.c_str()) && Ready(text.c_str())) {
 					Submit(Planner::Choice::Action::kOther, a_data, laterHours, index);
 					return;
 				}
 			}
 			ImGuiMCP::SameLine();
-			if (ImGuiMCP::Button("Cancel") || ImGuiMCP::IsKeyPressed(ImGuiMCP::ImGuiKey_Escape, false) ||
-				ImGuiMCP::IsKeyPressed(ImGuiMCP::ImGuiKey_GamepadFaceRight, false)) {
+			const char* cancelSource = nullptr;
+			if (ImGuiMCP::Button("Cancel")) {
+				cancelSource = "the Cancel button";
+			} else if (ImGuiMCP::IsKeyPressed(ImGuiMCP::ImGuiKey_Escape, false)) {
+				cancelSource = "the Escape key";
+			} else if (ImGuiMCP::IsKeyPressed(ImGuiMCP::ImGuiKey_GamepadFaceRight, false)) {
+				cancelSource = "the controller's B button";
+			}
+			if (cancelSource && Ready(cancelSource)) {
+				logs::info("Panel: cancelled with {}", cancelSource);
 				Submit(Planner::Choice::Action::kCancel, a_data, laterHours);
 				return;
 			}
@@ -215,12 +389,26 @@ namespace FTAP::Panel
 				if (data.serial != g_ui.serial) {
 					g_ui = UiState{};
 					g_ui.serial = data.serial;
+					g_ui.openedAt = ImGuiMCP::GetTime();
+					g_ui.look = MakeLook();
 					if (data.trip.valid && data.trip.hours > 0.0) {
 						const auto range = MakeRange(data.nowHour, data.trip.hours);
 						g_ui.laterDay = range.dayMin;
 						g_ui.laterHour = range.HourMin(range.dayMin);
 					}
 				}
+				const auto& look = g_ui.look;
+
+				// The player's chosen font, if SKSE Menu Framework has it (the framework pushes
+				// nothing for an unknown name, so check before popping).
+				const auto settings = Settings::Current();
+				bool       pushedFont = false;
+				if (!settings->font.empty()) {
+					const auto before = ImGuiMCP::GetFont();
+					SKSEMenuFramework::PushFont(settings->font);
+					pushedFont = ImGuiMCP::GetFont() != before;
+				}
+				const auto [colors, vars] = PushLook(look);
 
 				const auto viewport = ImGuiMCP::GetMainViewport();
 				if (viewport) {
@@ -228,13 +416,18 @@ namespace FTAP::Panel
 						ImGuiMCP::ImVec2{ viewport->Pos.x + viewport->Size.x * 0.5f, viewport->Pos.y + viewport->Size.y * 0.5f },
 						ImGuiMCP::ImGuiCond_Appearing, ImGuiMCP::ImVec2{ 0.5f, 0.5f });
 				}
-				const auto title = std::format("Fast travel to {}###FTAPArrivalPanel", data.destination);
-				const auto flags = ImGuiMCP::ImGuiWindowFlags_NoCollapse | ImGuiMCP::ImGuiWindowFlags_AlwaysAutoResize |
+				const auto flags = ImGuiMCP::ImGuiWindowFlags_NoDecoration | ImGuiMCP::ImGuiWindowFlags_AlwaysAutoResize |
 				                   ImGuiMCP::ImGuiWindowFlags_NoSavedSettings;
-				if (ImGuiMCP::Begin(title.c_str(), nullptr, flags)) {
-					RenderPanelContents(data);
+				if (ImGuiMCP::Begin("Fast Travel Arrival Planner###FTAPArrivalPanel", nullptr, flags)) {
+					RenderPanelContents(data, look);
 				}
 				ImGuiMCP::End();
+
+				ImGuiMCP::PopStyleVar(vars);
+				ImGuiMCP::PopStyleColor(colors);
+				if (pushedFont) {
+					ImGuiMCP::PopFont();
+				}
 			} catch (const std::exception& e) {
 				logs::error("Panel render failed: {}", e.what());
 			} catch (...) {
@@ -261,12 +454,13 @@ namespace FTAP::Panel
 					ImGuiMCP::BulletText("%s", line.c_str());
 				}
 				ImGuiMCP::TextDisabled("%s", "Full details: Documents\\My Games\\Skyrim Special Edition\\SKSE\\FastTravelArrivalPlanner.log");
+				ImGuiMCP::TextDisabled("Settings: %s", Settings::FilePath().c_str());
 
 				ImGuiMCP::Spacing();
 				if (ImGuiMCP::Button("Reload INI")) {
 					Settings::Reload();
 				}
-				Tooltip("Reads FastTravelArrivalPlanner.ini again after you edit it.");
+				Tooltip("Reads your settings file again after you edit it.");
 			} catch (...) {
 				logs::error("Status page render failed");
 			}

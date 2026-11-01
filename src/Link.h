@@ -16,4 +16,8 @@ namespace FTAP::Link
 	// Formats through FTTI, so the panel shows exactly what FTTI's flyout shows.
 	[[nodiscard]] std::string FormatDuration(double a_hours, bool a_approx);
 	[[nodiscard]] std::string FormatArrival(double a_hoursFromNow);
+
+	// The map flyout's colours and FTTI's background settings. False (and defaults) with an
+	// FTTI older than 0.2.0.
+	bool GetFlyoutStyle(FTTI_API::FlyoutStyle& a_out);
 }

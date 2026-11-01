@@ -6,6 +6,11 @@ namespace FTAP::Link
 {
 	namespace
 	{
+		// Version 1 (FTTI 0.1.4) has everything the planner needs; version 2 (FTTI 0.2.0) adds the
+		// flyout style for the panel's look.
+		constexpr std::uint32_t MIN_INTERFACE_VERSION = 1;
+		constexpr std::size_t   MIN_INTERFACE_SIZE = offsetof(FTTI_API::Interface, GetFlyoutStyle);
+
 		std::atomic<const FTTI_API::Interface*> g_interface{ nullptr };
 		std::atomic<std::uint32_t>              g_offeredVersion{ 0 };
 
@@ -17,11 +22,10 @@ namespace FTAP::Link
 			const auto iface = static_cast<const FTTI_API::Interface*>(a_message->data);
 			g_offeredVersion = iface->version;
 			// Members are only ever added at the end, so a bigger interface from a newer FTTI is fine.
-			if (iface->version < FTTI_API::INTERFACE_VERSION || iface->size < sizeof(FTTI_API::Interface) ||
-				a_message->dataLen < sizeof(FTTI_API::Interface) || !iface->GetTripTo || !iface->ExcludeNextTrip ||
-				!iface->FormatDuration || !iface->FormatArrival) {
+			if (iface->version < MIN_INTERFACE_VERSION || iface->size < MIN_INTERFACE_SIZE || a_message->dataLen < MIN_INTERFACE_SIZE ||
+				!iface->GetTripTo || !iface->ExcludeNextTrip || !iface->FormatDuration || !iface->FormatArrival) {
 				logs::error("Fast Travel Time Info offered interface version {}, but version {} or newer is needed. Update Fast Travel Time Info.",
-					iface->version, FTTI_API::INTERFACE_VERSION);
+					iface->version, MIN_INTERFACE_VERSION);
 				return;
 			}
 			g_interface = iface;
@@ -47,7 +51,7 @@ namespace FTAP::Link
 				iface->pluginVersion ? iface->pluginVersion : "?", iface->version);
 		}
 		if (const auto offered = g_offeredVersion.load(); offered != 0) {
-			return std::format("Fast Travel Time Info is too old (interface version {}, need {})", offered, FTTI_API::INTERFACE_VERSION);
+			return std::format("Fast Travel Time Info is too old (interface version {}, need {})", offered, MIN_INTERFACE_VERSION);
 		}
 		return "Fast Travel Time Info 0.1.4 or newer was not found";
 	}
@@ -59,6 +63,17 @@ namespace FTAP::Link
 			iface->FormatDuration(a_hours, a_approx, buffer.data(), static_cast<std::uint32_t>(buffer.size()));
 		}
 		return buffer.data();
+	}
+
+	bool GetFlyoutStyle(FTTI_API::FlyoutStyle& a_out)
+	{
+		a_out = FTTI_API::FlyoutStyle{};
+		const auto iface = Get();
+		if (!iface || iface->version < FTTI_API::FLYOUT_STYLE_VERSION || iface->size < sizeof(FTTI_API::Interface) || !iface->GetFlyoutStyle) {
+			return false;  // FTTI older than 0.2.0: defaults
+		}
+		iface->GetFlyoutStyle(&a_out);
+		return true;
 	}
 
 	std::string FormatArrival(double a_hoursFromNow)
