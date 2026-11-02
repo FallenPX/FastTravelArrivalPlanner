@@ -262,7 +262,7 @@ namespace FTAP::Planner
 				return;
 			}
 			if (!Panel::IsAvailable()) {
-				logs::info("  SKSE Menu Framework is not available: the game's box stays");
+				logs::info("  No arrival panel is available (Interface\\FastTravelArrivalPlanner.swf missing and SKSE Menu Framework not installed): the game's box stays");
 				return;
 			}
 
@@ -454,7 +454,7 @@ namespace FTAP::Planner
 			}
 		}
 
-		// A choice waiting for SKSE Menu Framework to let go of the screen (UI thread). Checked
+		// A choice waiting for the panel to let go of the screen (UI thread). Checked
 		// once per map frame by the map hook below, never by a task that queues itself again.
 		std::optional<Choice> g_pendingChoice;
 		int                   g_pendingFrames{ 0 };
@@ -466,7 +466,7 @@ namespace FTAP::Planner
 				Execute(a_choice);
 				return;
 			}
-			logs::info("Waiting for SKSE Menu Framework to let go of the screen before carrying out the choice");
+			logs::info("Waiting for {} to let go of the screen before carrying out the choice", Panel::Name());
 			std::lock_guard guard{ g_lock };
 			g_pendingChoice = a_choice;
 			g_pendingFrames = 0;
@@ -844,7 +844,7 @@ namespace FTAP::Planner
 						if (g_pendingChoice && (Panel::IsReleased() || ++g_pendingFrames >= MAX_PENDING_FRAMES)) {
 							ready = g_pendingChoice;
 							g_pendingChoice.reset();
-							logs::info("SKSE Menu Framework let go after {} map frame(s){}", g_pendingFrames,
+							logs::info("{} let go after {} map frame(s){}", Panel::Name(), g_pendingFrames,
 								g_pendingFrames >= MAX_PENDING_FRAMES ? " (stopped waiting)" : "");
 						}
 					}

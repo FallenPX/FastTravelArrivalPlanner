@@ -24,6 +24,7 @@ namespace
 			} else {
 				logs::error("{}. The planner stays inactive and the game's own box is used.", FTAP::Link::Describe());
 			}
+			FTAP::Panel::RegisterGameInterface();
 			FTAP::Planner::Install();
 			break;
 		case SKSE::MessagingInterface::kPreLoadGame:

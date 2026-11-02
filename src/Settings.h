@@ -14,8 +14,9 @@ namespace FTAP
 		float minHoursForFaster{ 1.0f };       // Instant, 1/3 and 1/2 need at least this ETA (0 = no limit)
 		bool  skipAfterConversation{ true };   // map opened from a conversation: leave it to the game
 		float conversationSeconds{ 2.0f };     // "right after a conversation" window
-		bool  matchMapStyle{ true };           // panel colours and background follow the map's flyout
-		std::string font;                      // SKSE Menu Framework font for the panel ("" = the framework's own)
+		bool  gameInterface{ true };           // the panel in the game's own interface (else SKSE Menu Framework's)
+		bool  matchMapStyle{ true };           // SKSE Menu Framework panel: colours and background follow the map's flyout
+		std::string font;                      // SKSE Menu Framework panel: font ("" = the framework's own)
 
 		[[nodiscard]] static std::shared_ptr<const Settings> Current();
 		static void                                         Reload();

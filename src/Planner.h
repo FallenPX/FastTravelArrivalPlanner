@@ -44,7 +44,7 @@ namespace FTAP::Planner
 		std::uint64_t   serial{ 0 };
 	};
 
-	// Called by the panel (render thread). The choice is carried out on the UI thread.
+	// Called by the panel (render thread or UI thread). The choice is carried out on the UI thread.
 	void Submit(const Choice& a_choice);
 
 	// Lines describing the last planned trip, for the status page.

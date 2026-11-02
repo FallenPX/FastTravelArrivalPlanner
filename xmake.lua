@@ -5,7 +5,7 @@
 set_xmakever("3.0.0")
 
 set_project("FastTravelArrivalPlanner")
-set_version("0.0.14")
+set_version("0.1.0")
 set_license("GPL-3.0")
 set_arch("x64")
 set_languages("c++23")

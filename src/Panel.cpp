@@ -1,8 +1,10 @@
 #include "pch.h"
 
 #include "Panel.h"
+#include "GamePanel.h"
 #include "Link.h"
 #include "Planner.h"
+#include "LaterRange.h"
 #include "Settings.h"
 
 // SKSEMenuFramework.h includes <windows.h>, so it is kept to this one file.
@@ -14,9 +16,12 @@
 #endif
 #include "SKSEMenuFramework.h"
 
-// The arrival panel (a SKSE Menu Framework window that blocks the map behind it) and a small
-// status page in the framework's own menu. Rendering happens on the render thread: the panel
-// only reads a copy of the planner's data and hands the player's choice back to the planner.
+// The arrival panel, in one of two forms:
+//  - in the game's own interface (GamePanel.cpp), the default;
+//  - a SKSE Menu Framework window that blocks the map behind it (this file), plus a small
+//    status page in the framework's own menu. It renders on the render thread: it only reads
+//    a copy of the planner's data and hands the player's choice back to the planner.
+// The functions at the end choose between them each time a panel opens.
 
 namespace FTAP::Panel
 {
@@ -25,37 +30,15 @@ namespace FTAP::Panel
 		using Planner::Timing;
 
 		MENU_WINDOW       g_window = nullptr;
-		std::atomic<bool> g_available{ false };
+		std::atomic<bool> g_available{ false };  // SKSE Menu Framework's panel
 
-		// Later arrivals, in whole hours. Times are counted from today's midnight; the day is
-		// counted from the day of the normal arrival.
-		struct LaterRange
+		enum class Kind
 		{
-			double etaAbs{ 0.0 };   // normal arrival, hours since today's midnight
-			int    etaDay{ 0 };     // days after today
-			int    etaHour{ 0 };    // whole hour of the day of the normal arrival
-			int    dayMin{ 0 };
-			int    dayMax{ Planner::MAX_LATER_DAYS };
-
-			[[nodiscard]] int HourMin(int a_day) const { return a_day == 0 ? etaHour + 1 : 0; }
-			[[nodiscard]] int HourMax(int a_day) const { return a_day == Planner::MAX_LATER_DAYS ? etaHour : 23; }
-			// Arrival in hours from now.
-			[[nodiscard]] double HoursFromNow(int a_day, int a_hour, double a_nowHour) const
-			{
-				return (etaDay + a_day) * 24.0 + a_hour - a_nowHour;
-			}
+			kNone,
+			kGame,
+			kFramework
 		};
-
-		LaterRange MakeRange(double a_nowHour, double a_eta)
-		{
-			LaterRange r;
-			r.etaAbs = a_nowHour + a_eta;
-			r.etaDay = static_cast<int>(std::floor(r.etaAbs / 24.0));
-			r.etaHour = static_cast<int>(std::floor(r.etaAbs - r.etaDay * 24.0));
-			r.etaHour = std::clamp(r.etaHour, 0, 23);
-			r.dayMin = r.etaHour >= 23 ? 1 : 0;
-			return r;
-		}
+		std::atomic<Kind> g_active{ Kind::kNone };  // the panel opened last
 
 		void Tooltip(const char* a_text)
 		{
@@ -636,6 +619,11 @@ namespace FTAP::Panel
 				ImGuiMCP::TextWrapped("%s", Link::Describe().c_str());
 				ImGuiMCP::Text("Panel: %s   Faster options from: %.2f h", settings->enabled && settings->showPanel ? "on" : "off",
 					static_cast<double>(settings->minHoursForFaster));
+				const bool game = GamePanel::IsAvailable() && settings->gameInterface;
+				ImGuiMCP::Text("Drawn by: %s", game ? "the game's own interface" : "SKSE Menu Framework");
+				if (settings->gameInterface && !GamePanel::IsAvailable()) {
+					ImGuiMCP::TextDisabled("%s", "Interface\\FastTravelArrivalPlanner.swf is missing, so SKSE Menu Framework draws it.");
+				}
 
 				ImGuiMCP::SeparatorText("Last planned trip");
 				const auto lines = Planner::LastTripLines();
@@ -665,7 +653,7 @@ namespace FTAP::Panel
 			return false;
 		}
 		if (!SKSEMenuFramework::IsInstalled() || !GetMenuFrameworkModule()) {
-			logs::error("SKSE Menu Framework is not installed or not loaded: the arrival panel is unavailable and the game's own box is used");
+			logs::info("SKSE Menu Framework is not installed or not loaded: only the panel in the game's own interface can be used, and there is no status page");
 			return false;
 		}
 		g_window = SKSEMenuFramework::AddWindow(RenderPanel, true);
@@ -681,35 +669,84 @@ namespace FTAP::Panel
 		return true;
 	}
 
+	bool RegisterGameInterface()
+	{
+		return GamePanel::Register();
+	}
+
 	bool IsAvailable()
 	{
-		return g_available.load();
+		return GamePanel::IsAvailable() || g_available.load();
 	}
 
 	bool IsOpen()
 	{
-		return g_window && g_window->IsOpen.load();
+		switch (g_active.load()) {
+		case Kind::kGame:
+			return GamePanel::IsOpen();
+		case Kind::kFramework:
+			return g_window && g_window->IsOpen.load();
+		default:
+			return false;
+		}
 	}
 
 	bool IsReleased()
 	{
-		if (!g_available) {
+		switch (g_active.load()) {
+		case Kind::kGame:
+			return GamePanel::IsReleased();
+		case Kind::kFramework:
+			return !g_available || (!(g_window && g_window->IsOpen.load()) && !SKSEMenuFramework::IsAnyBlockingWindowOpened());
+		default:
 			return true;
 		}
-		return !IsOpen() && !SKSEMenuFramework::IsAnyBlockingWindowOpened();
+	}
+
+	std::string_view Name()
+	{
+		switch (g_active.load()) {
+		case Kind::kGame:
+			return "the game's own interface";
+		case Kind::kFramework:
+			return "SKSE Menu Framework";
+		default:
+			return "no panel";
+		}
 	}
 
 	void Open()
 	{
-		if (g_window) {
+		const auto settings = Settings::Current();
+		const bool game = GamePanel::IsAvailable() && (settings->gameInterface || !g_available);
+		if (game) {
+			g_active = Kind::kGame;
+			GamePanel::Open();
+		} else if (g_window) {
+			g_active = Kind::kFramework;
 			g_window->IsOpen = true;
+		} else {
+			g_active = Kind::kNone;
 		}
+		logs::info("  Panel drawn by {}{}", Name(),
+			settings->gameInterface && !game && g_window ? " (Interface\\FastTravelArrivalPlanner.swf is missing)" :
+			!settings->gameInterface && game         ? " (SKSE Menu Framework is not available)" :
+			                                            "");
 	}
 
 	void Close()
 	{
-		if (g_window) {
-			g_window->IsOpen = false;
+		switch (g_active.load()) {
+		case Kind::kGame:
+			GamePanel::Close();
+			break;
+		case Kind::kFramework:
+			if (g_window) {
+				g_window->IsOpen = false;
+			}
+			break;
+		default:
+			break;
 		}
 	}
 }

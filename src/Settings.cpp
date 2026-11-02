@@ -132,6 +132,7 @@ namespace FTAP
 				MakeFloat("fMinHoursForFaster", &Settings::minHoursForFaster, 0.0f, 48.0f),
 				MakeBool("bSkipAfterConversation", &Settings::skipAfterConversation),
 				MakeFloat("fConversationSeconds", &Settings::conversationSeconds, 0.0f, 30.0f),
+				MakeBool("bGameInterface", &Settings::gameInterface, "Panel"),
 				MakeBool("bMatchMapStyle", &Settings::matchMapStyle, "Panel"),
 				MakeString("sFont", &Settings::font, "Panel"),
 			};
@@ -574,9 +575,9 @@ namespace FTAP
 		} else {
 			logs::info("No settings file at {}, using defaults", path.string());
 		}
-		logs::info("Settings: enabled={} panel={} minHoursForFaster={:.2f} skipAfterConversation={} ({:.1f} s) matchMapStyle={} font=\"{}\"",
+		logs::info("Settings: enabled={} panel={} minHoursForFaster={:.2f} skipAfterConversation={} ({:.1f} s) gameInterface={} matchMapStyle={} font=\"{}\"",
 			loaded.enabled, loaded.showPanel, loaded.minHoursForFaster, loaded.skipAfterConversation,
-			loaded.conversationSeconds, loaded.matchMapStyle, loaded.font);
+			loaded.conversationSeconds, loaded.gameInterface, loaded.matchMapStyle, loaded.font);
 		auto next = std::make_shared<const Settings>(std::move(loaded));
 		std::lock_guard guard{ g_lock };
 		g_current = std::move(next);
