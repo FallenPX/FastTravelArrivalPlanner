@@ -20,7 +20,7 @@ Without Fast Travel Time Info 0.1.4+, the planner stays inactive and the game's 
 By default the game's own interface draws the panel, as it draws the map: the panel takes the font, text sizes, colours and text shadow of the map's location flyout, from whatever interface mod draws that flyout, and Fast Travel Time Info's background settings, including none when its background is off. The cursor is the game's, so an interface mod's cursor stays. The panel's movie, `Interface\FastTravelArrivalPlanner.swf`, is an empty stage that ships with the mod; the plugin builds the panel on it when it opens.
 
 - Mouse: click a timing choice, drag the Day and Hour sliders (or click the track), then Proceed, Place Marker or Cancel.
-- Keyboard: Left and Right choose the timing, Up and Down the hour, Page Up and Page Down the day; Enter proceeds; Escape or Tab cancels.
+- Keyboard: Left and Right choose the timing, Up and Down the hour, Page Up and Page Down the day; Enter proceeds; Escape or Tab cancels. The game's own inputs work too (its Accept, Cancel, Up, Down, Left, Right, page inputs), so key bindings and a controller should follow; a press that arrives both ways counts once.
 - Instant, 1/3 and 1/2 need a travel time of at least `fMinHoursForFaster`; a line under the choices says so when they are greyed out.
 
 ## How it works
@@ -44,7 +44,7 @@ Still open:
    - Background: on, and off in Fast Travel Time Info's settings.
    - Mouse: the timing choices, both sliders (drag and click), every button.
    - Keyboard: Left/Right, Up/Down, Page Up/Page Down, Enter, Escape, Tab.
-   - Controller, if you have one: the log lists the first keys and inputs the panel receives (*Game panel: key ...*, *Game panel: input ...*), so the controller's buttons can be mapped.
+   - Controller, if you have one: the log lists each key and input the panel receives once per panel, with what it did (*Game panel: key 9 -> Cancel*, *Game panel: input "Cancel" -> Cancel*), so any button that does nothing can be mapped.
    - `bGameInterface = 0` should bring back the SKSE Menu Framework panel.
 2. **Does the planner stay out of other travel?**
    - Take a carriage: no panel should appear.
@@ -77,6 +77,7 @@ Your settings live in `Documents\My Games\Skyrim Special Edition\SKSE\FastTravel
 
 ## Changelog
 
+- **0.1.1**: Keyboard and controller: the panel also follows the game's own inputs (Accept, Cancel, Up, Down, Left, Right and the page inputs), and a press that arrives both as a key and as an input counts once. Numpad Enter proceeds. When the flyout has no rows to copy (the Forgotten Vale, for one), the panel's rows keep the look of an earlier flyout instead of the title's font. The log lists each key and input once per panel with what it did.
 - **0.1.0**: The panel is now drawn by the game's own interface, like the map: sharp text in the flyout's own font, sizes, colours and text shadow (copied from the flyout as the game draws it), Fast Travel Time Info's background, and the game's cursor, so an interface mod's cursor stays. Keyboard: Left/Right for the timing, Up/Down for the hour, Page Up/Page Down for the day, Enter to proceed, Escape or Tab to cancel. When Instant, 1/3 and 1/2 are greyed out, a line under them says why. SKSE Menu Framework is now optional: `bGameInterface = 0` (new, in `[Panel]`) brings back its panel, and it still provides the status page. The mod now includes `Interface\FastTravelArrivalPlanner.swf`.
 - **0.0.14**: The panel uses the flyout's font only if SKSE Menu Framework really hands back that font (some versions hand back their own instead), and the log names the font actually used.
 - **0.0.13**: With Fast Travel Time Info 0.3.2 the panel's text matches the flyout's size (the heading as large as the location name). When the flyout's shadow cannot be read, the panel draws one like the vanilla and Dear Diary flyouts: black, 2 map pixels down and to the right, with a soft edge.

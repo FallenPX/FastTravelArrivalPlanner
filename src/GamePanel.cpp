@@ -118,7 +118,6 @@ namespace FTAP::GamePanel
 			};
 			std::optional<Filter> filter;
 			bool                  fromFlyout{ false };
-			double                scale{ 1.0 };  // the flyout's own scale on the map's stage
 		};
 
 		constexpr std::array FILTER_MEMBERS{ "distance", "angle", "color", "alpha", "blurX", "blurY", "strength", "quality", "inner",
@@ -206,16 +205,6 @@ namespace FTAP::GamePanel
 				}
 			}
 			a_style.filter = ReadFilter(a_field);
-			// The scale of the clips holding it (for the log: a mod that scales the flyout).
-			RE::GFxValue clip = a_field;
-			for (int i = 0; i < 8 && clip.IsDisplayObject(); ++i) {
-				a_style.scale *= Number(clip, "_yscale").value_or(100.0) / 100.0;
-				RE::GFxValue parent;
-				if (!Get(clip, "_parent", parent) || !parent.IsDisplayObject()) {
-					break;
-				}
-				clip = parent;
-			}
 			a_style.fromFlyout = true;
 			return true;
 		}
@@ -255,6 +244,7 @@ namespace FTAP::GamePanel
 			std::uint32_t backgroundColor{ 0x000000 };
 			double        backgroundAlpha{ 60.0 };  // 0 to 100
 			double        radius{ 3.0 };            // in the map's pixels, as Fast Travel Time Info draws it
+			const char*   rowsFrom{ "the flyout" };  // where the rows' look came from
 			// The flyout's text shadow, for the drawn diamonds.
 			std::optional<double> shadowDistance;
 			double                shadowAngle{ 45.0 };
@@ -326,15 +316,26 @@ namespace FTAP::GamePanel
 					}
 				}
 			}
-			// No rows seen: the rows take the title's look at two thirds of its size.
-			for (auto* row : { &look.label, &look.value }) {
-				if (!row->fromFlyout && look.title.fromFlyout) {
+			// The flyout shows no rows (no travel time for this place, the Forgotten Vale for one):
+			// the rows of an earlier flyout this session, otherwise the title's look in the font
+			// and size the game's own flyout rows use.
+			static std::optional<std::pair<TextStyle, TextStyle>> s_lastRows;  // UI thread only
+			if (look.label.fromFlyout && look.value.fromFlyout) {
+				s_lastRows = { look.label, look.value };
+			} else if (s_lastRows) {
+				look.label = s_lastRows->first;
+				look.value = s_lastRows->second;
+				look.rowsFrom = "an earlier flyout";
+			} else if (look.title.fromFlyout) {
+				for (auto* row : { &look.label, &look.value }) {
 					const auto color = row->color;
 					*row = look.title;
+					row->font = "$EverywhereFont";
 					row->size = std::round(look.title.size * 2.0 / 3.0);
 					row->color = color;
 					row->fromFlyout = false;
 				}
+				look.rowsFrom = "the title";
 			}
 			for (const auto& [name, value] : look.title.properties) {
 				const auto* number = std::get_if<double>(&value);
@@ -623,9 +624,11 @@ namespace FTAP::GamePanel
 				m_laterDay = m_range.dayMin;
 				m_laterHour = m_range.HourMin(m_laterDay);
 				m_top.reset();
+				m_inputLogged = 0;
+				m_inputSeen.clear();
 				logs::info("Game panel: title {}; labels {}; values {}", Describe(m_look.title), Describe(m_look.label), Describe(m_look.value));
 				if (m_look.title.fromFlyout) {
-					logs::info("Game panel: flyout scale {:.0f}%{}; background {}", m_look.title.scale * 100.0, m_look.label.fromFlyout ? "" : " (no flyout row to copy: rows follow the title)",
+					logs::info("Game panel: rows from {}; background {}", m_look.rowsFrom,
 						m_look.background ? std::format("#{:06X} at {:.0f}%, corners {:g}", m_look.backgroundColor, m_look.backgroundAlpha, m_look.radius) : "off"s);
 				} else {
 					logs::warn("Game panel: the map's flyout could not be read: default look");
@@ -1231,8 +1234,57 @@ namespace FTAP::GamePanel
 				Planner::Submit(choice);
 			}
 
-			// Keyboard (and whatever the game turns controller buttons into). Logged, to learn
-			// what a controller sends.
+			// What a key or one of the game's inputs asks for.
+			enum class Command
+			{
+				kNone,
+				kCancel,
+				kProceed,
+				kPrevious,  // timing choice to the left
+				kNext,
+				kHourUp,
+				kHourDown,
+				kDayUp,
+				kDayDown,
+			};
+
+			static const char* CommandName(Command a_command)
+			{
+				switch (a_command) {
+				case Command::kCancel:
+					return "Cancel";
+				case Command::kProceed:
+					return "Proceed";
+				case Command::kPrevious:
+					return "previous timing";
+				case Command::kNext:
+					return "next timing";
+				case Command::kHourUp:
+					return "hour up";
+				case Command::kHourDown:
+					return "hour down";
+				case Command::kDayUp:
+					return "day up";
+				case Command::kDayDown:
+					return "day down";
+				default:
+					return "nothing";
+				}
+			}
+
+			// Each input name is logged once per panel, keys up to a limit: enough to learn what
+			// a keyboard and a controller send without filling the log with mouse clicks.
+			void LogInput(const std::string& a_what, Command a_command)
+			{
+				if (m_inputLogged >= 24 || std::ranges::find(m_inputSeen, a_what) != m_inputSeen.end()) {
+					return;
+				}
+				++m_inputLogged;
+				m_inputSeen.push_back(a_what);
+				logs::info("Game panel: {} -> {}", a_what, CommandName(a_command));
+			}
+
+			// Keys, as the movie receives them.
 			bool HandleKey(RE::UIMessage& a_message)
 			{
 				const auto data = static_cast<RE::BSUIScaleformData*>(a_message.data);
@@ -1241,50 +1293,104 @@ namespace FTAP::GamePanel
 					return false;
 				}
 				const auto key = static_cast<RE::GFxKeyEvent*>(event)->keyCode;
-				if (m_inputLogged < 12) {
-					++m_inputLogged;
-					logs::info("Game panel: key {}", static_cast<int>(key));
+				Command    command = Command::kNone;
+				switch (key) {
+				case RE::GFxKey::kEscape:
+				case RE::GFxKey::kTab:  // backs out of the game's menus too
+					command = Command::kCancel;
+					break;
+				case RE::GFxKey::kReturn:
+				case RE::GFxKey::kKP_Enter:
+					command = Command::kProceed;
+					break;
+				case RE::GFxKey::kLeft:
+					command = Command::kPrevious;
+					break;
+				case RE::GFxKey::kRight:
+					command = Command::kNext;
+					break;
+				case RE::GFxKey::kUp:
+					command = Command::kHourUp;
+					break;
+				case RE::GFxKey::kDown:
+					command = Command::kHourDown;
+					break;
+				case RE::GFxKey::kPageUp:
+					command = Command::kDayUp;
+					break;
+				case RE::GFxKey::kPageDown:
+					command = Command::kDayDown;
+					break;
+				default:
+					break;
 				}
-				return Command(key);
+				const auto what = std::format("key {}", static_cast<int>(key));
+				LogInput(what, command);
+				return command != Command::kNone && Run(command, false, what);
 			}
 
+			// The game's own inputs ("Cancel", "Accept", "Up"...), which follow the player's key
+			// bindings and the controller.
 			bool HandleUserEvent(RE::UIMessage& a_message)
 			{
-				const auto data = static_cast<RE::BSUIMessageData*>(a_message.data);
+				const auto        data = static_cast<RE::BSUIMessageData*>(a_message.data);
 				const std::string name = data && data->fixedStr.c_str() ? data->fixedStr.c_str() : "";
-				if (m_inputLogged < 12) {
-					++m_inputLogged;
-					logs::info("Game panel: input \"{}\"", name);
+				static const std::array<std::pair<std::string_view, Command>, 10> inputs{ {
+					{ "Cancel", Command::kCancel },
+					{ "Accept", Command::kProceed },
+					{ "Left", Command::kPrevious },
+					{ "Right", Command::kNext },
+					{ "Up", Command::kHourUp },
+					{ "Down", Command::kHourDown },
+					{ "PageUp", Command::kDayUp },
+					{ "PageDown", Command::kDayDown },
+					{ "NextPage", Command::kDayUp },
+					{ "PrevPage", Command::kDayDown },
+				} };
+				Command command = Command::kNone;
+				for (const auto& [input, what] : inputs) {
+					if (name == input) {
+						command = what;
+						break;
+					}
 				}
-				// Only Cancel: the rest arrive as keys too, and acting on both would move twice.
-				if (name == "Cancel") {
-					return Command(RE::GFxKey::kEscape);
-				}
-				return false;
+				const auto what = std::format("input \"{}\"", name);
+				LogInput(what, command);
+				return command != Command::kNone && Run(command, true, std::format("the game's \"{}\" input", name));
 			}
 
-			bool Command(RE::GFxKey::Code a_key)
+			bool Run(Command a_command, bool a_fromInput, const std::string& a_how)
 			{
 				if (m_submitted) {
 					return true;
 				}
-				switch (a_key) {
-				case RE::GFxKey::kEscape:
-				case RE::GFxKey::kTab:  // backs out of the game's menus too
-					if (Ready("Escape")) {
-						Choose(Planner::Choice::Action::kCancel, -1, a_key == RE::GFxKey::kTab ? "the Tab key" : "Escape or Cancel");
+				// One press often arrives twice, as a key and as the game's input (Tab: "Cancel"
+				// and key 9 in the same frame). Act once.
+				const auto now = std::chrono::steady_clock::now();
+				if (a_command == m_lastCommand && a_fromInput != m_lastFromInput && now - m_lastCommandAt < std::chrono::milliseconds(100)) {
+					m_lastCommand = Command::kNone;
+					return true;
+				}
+				m_lastCommand = a_command;
+				m_lastFromInput = a_fromInput;
+				m_lastCommandAt = now;
+
+				switch (a_command) {
+				case Command::kCancel:
+					if (Ready(a_how.c_str())) {
+						Choose(Planner::Choice::Action::kCancel, -1, a_how);
 					}
 					return true;
-				case RE::GFxKey::kReturn:
-					if (Ready("Enter")) {
-						Choose(Planner::Choice::Action::kProceed, -1, "the Enter key");
+				case Command::kProceed:
+					if (Ready(a_how.c_str())) {
+						Choose(Planner::Choice::Action::kProceed, -1, a_how);
 					}
 					return true;
-				case RE::GFxKey::kLeft:
-				case RE::GFxKey::kRight:
+				case Command::kPrevious:
+				case Command::kNext:
 					{
 						// The next choice that is available, to the left or the right.
-						const int step = a_key == RE::GFxKey::kLeft ? -1 : 1;
+						const int step = a_command == Command::kPrevious ? -1 : 1;
 						int       index = static_cast<int>(m_timing);
 						for (int tries = 0; tries < 5; ++tries) {
 							index += step;
@@ -1299,17 +1405,17 @@ namespace FTAP::GamePanel
 						}
 						return true;
 					}
-				case RE::GFxKey::kUp:
-				case RE::GFxKey::kDown:
+				case Command::kHourUp:
+				case Command::kHourDown:
 					if (m_timing == Timing::kLater) {
-						SetSlider(1, m_laterHour + (a_key == RE::GFxKey::kUp ? 1 : -1));
+						SetSlider(1, m_laterHour + (a_command == Command::kHourUp ? 1 : -1));
 						m_dirty = true;
 					}
 					return true;
-				case RE::GFxKey::kPageUp:
-				case RE::GFxKey::kPageDown:
+				case Command::kDayUp:
+				case Command::kDayDown:
 					if (m_timing == Timing::kLater) {
-						SetSlider(0, m_laterDay + (a_key == RE::GFxKey::kPageUp ? 1 : -1));
+						SetSlider(0, m_laterDay + (a_command == Command::kDayUp ? 1 : -1));
 						m_dirty = true;
 					}
 					return true;
@@ -1340,6 +1446,10 @@ namespace FTAP::GamePanel
 			bool                                     m_warnedFilter{ false };
 			std::optional<double>                    m_top;
 			int                                      m_inputLogged{ 0 };
+			std::vector<std::string>                 m_inputSeen;
+			Command                                  m_lastCommand{ Command::kNone };
+			bool                                     m_lastFromInput{ false };
+			std::chrono::steady_clock::time_point    m_lastCommandAt{};
 		};
 
 		void Handler::Call(Params& a_params)
