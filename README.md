@@ -1,16 +1,14 @@
-# Fast Travel Arrival Planner (prototype)
+# Fast Travel Arrival Planner
 
 An SKSE plugin for Skyrim Special Edition / Anniversary Edition and an add-on for **Fast Travel Time Info**. When you click a destination on the world map, an arrival panel opens in place of the game's "Fast travel to ...?" box. There you choose **when you arrive**: instantly, in 1/3 or 1/2 of the normal travel time, at the normal ETA, or later, at a whole hour up to 30 days after the normal arrival.
 
 Time only ever moves forward. Proceed with untouched settings is exactly a normal fast travel.
 
-**This is a prototype.** It writes every step to its log for testing.
-
 ## Requirements
 
 - SKSE64 matching your game version
 - Address Library for SKSE Plugins (All in one)
-- **Fast Travel Time Info 0.1.4 or newer** (0.2.0 or newer recommended: the panel then matches the map's flyout)
+- **Fast Travel Time Info**, preferably the latest version (0.1.4 is the oldest that works; from 0.2.0 the panel also follows its background settings)
 - SKSE Menu Framework: optional. It adds an in-game settings page.
 
 Without Fast Travel Time Info 0.1.4+, the planner stays inactive and the game's own box is used.
@@ -20,7 +18,8 @@ Without Fast Travel Time Info 0.1.4+, the planner stays inactive and the game's 
 The game's own interface draws the panel, as it draws the map: the panel takes the font, text sizes, colours and text shadow of the map's location flyout, from whatever interface mod draws that flyout, and Fast Travel Time Info's background settings, including none when its background is off. The cursor is the game's, so an interface mod's cursor stays. The panel's movie, `Interface\FastTravelArrivalPlanner.swf`, is an empty stage that ships with the mod; the plugin builds the panel on it when it opens.
 
 - Mouse: click a timing choice, drag the Day and Hour sliders (or click the track), then Proceed, Place Marker or Cancel.
-- Keyboard: Left and Right choose the timing, Up and Down the hour, Page Up and Page Down the day; Enter proceeds; Escape or Tab cancels. The game's own inputs work too (its Accept, Cancel, Up, Down, Left, Right, page inputs), so key bindings and a controller should follow; a press that arrives both ways counts once.
+- Keyboard: Left and Right choose the timing, Up and Down the hour, Page Up and Page Down the day; Enter proceeds; Escape or Tab cancels.
+- Controller: the panel also follows the game's own inputs (Accept, Cancel, Up, Down, Left, Right and the page inputs), so a controller should work, but this has not been tested yet.
 - Instant, 1/3 and 1/2 need a travel time of at least `fMinHoursForFaster`; a line under the choices says so when they are greyed out.
 
 ## How it works
@@ -30,26 +29,13 @@ The game's own interface draws the panel, as it draws the map: the panel takes t
 - **Calibration.** Faster trips are not used for Fast Travel Time Info's calibration.
 - **Other ways of travelling.** The planner only acts on the confirmation box the world map shows. Carriages and other travel are untouched. A map opened from a conversation is left alone too (`bSkipAfterConversation`).
 
-## Prototype tests
+## Reporting a problem
 
-For each trip, the settings page (with SKSE Menu Framework installed) shows the last planned trip: SKSE Menu Framework, then *Fast Travel Arrival Planner*, then *Settings*. Full details are in `Documents\My Games\Skyrim Special Edition\SKSE\FastTravelArrivalPlanner.log`.
+Please include both log files from `Documents\My Games\Skyrim Special Edition\SKSE`: `FastTravelArrivalPlanner.log` and `FastTravelTimeInfo.log`. By default the planner's log keeps a short summary of each trip. For a problem with the panel or a trip, switch on `bDetailedLog` (or *Detailed log* on the settings page) first and reproduce the problem: the log then records every step, and the keys and inputs the panel receives.
 
-Already confirmed: all timing options arrive on time (Instant at 0 minutes, 1/3 and 1/2 within a few minutes, Later to the minute, including into a new year); the two mods talk to each other; the panel replaces the box, and Proceed, Cancel and Place Marker work; Solstheim works; trips to and from the Forgotten Vale and Fort Dawnguard work, with the panel on and off; loading times are normal. The panel in the game's own interface (0.1.0 and later) has the interface mod's cursor, sharp text matching the flyout (size measured on screenshots), Fast Travel Time Info's background on and off, and works with the mouse and the keyboard (arrows, W/S, Page Up/Page Down, Enter, Escape, Tab).
+With SKSE Menu Framework installed, its *Fast Travel Arrival Planner* page also shows the last planned trip.
 
-Still open:
-
-1. **The settings page and your settings file (0.2.0).**
-   - Your settings file loses `bEnabled`, `bGameInterface`, `bMatchMapStyle`, `sFont` and the `[Panel]` section, and keeps everything else as you set it. The log says what was removed.
-   - Each change on the settings page takes effect at once and lands in your settings file; it is still there after a restart.
-2. **Controller**, if you have one: the log lists each key and input the panel receives once per panel, with what it did (*Panel: key 9 -> Cancel*), so any button that does nothing can be mapped.
-3. **Does the planner stay out of other travel?**
-   - Take a carriage: no panel should appear.
-   - If you use a mod that opens the map from a conversation, check that no panel appears there either. The log says *Map opened from a conversation*.
-4. **Panel details.**
-   - Does the game's own box ever flash briefly before the panel?
-5. **Fort Dawnguard with Fast Travel Time Info 0.1.9.** Trips into and out of it now have an approximate estimate, so the panel offers every option there. Try 1/3 or Later once.
-
-Please send back both log files: `FastTravelArrivalPlanner.log` and `FastTravelTimeInfo.log`.
+Tested on Skyrim Anniversary Edition 1.6.1170 with Dear Diary Dark Mode: all timing options (Instant at 0 minutes, 1/3 and 1/2 within a few minutes, Later to the minute, including into a new year), Proceed, Cancel and Place Marker, the mouse and the keyboard, Solstheim, the Forgotten Vale, Fort Dawnguard, and carriages (left alone). Not tested yet: a controller, and mods that open the map from a conversation.
 
 ## Getting the DLL
 
@@ -64,6 +50,7 @@ With SKSE Menu Framework installed, its *Fast Travel Arrival Planner* page chang
 - **`bShowPanel`** (on by default): clicking a destination on the world map opens the arrival panel. 0 brings back the game's own box, in case another interface mod conflicts.
 - **`fMinHoursForFaster`** (1 hour by default): Instant, 1/3 and 1/2 are offered only when the normal travel time is at least this many game hours, from 1 to 3. Shorter trips are quick enough as they are; a player who wants to walk a little more can raise it to 3. Travel times grow with the timescale: at the default timescale of 20, a trip takes 2.5 times as many game hours as at 8. The settings page slides from 1 to 3 hours in half hours. A value outside 1 to 3 in your settings file is replaced by the nearest one allowed, and the log says so.
 - **`bSkipAfterConversation`** (on by default): a map opened from a conversation is left to the game. **`fConversationSeconds`** (INI only) sets how soon after a conversation a map still counts as opened from it.
+- **`bDetailedLog`** (off by default): the log records every step of each trip as well; see *Reporting a problem*.
 
 ## Credits
 
@@ -73,6 +60,7 @@ With SKSE Menu Framework installed, its *Fast Travel Arrival Planner* page chang
 
 ## Changelog
 
+- **0.3.0**: First public release. The log is a short summary of each trip by default: the confirmation box, the choice, the target, what the game reported, and the clock move for Later. The new `bDetailedLog` (also on the settings page) brings back every step, the panel's inputs and its layout details for bug reports. The panel's look is logged once, and again only when it changes. Loading screens that do not belong to a planned trip (a carriage, a door) are no longer logged as part of the previous trip.
 - **0.2.2**: The minimum travel time for Instant, 1/3 and 1/2 (`fMinHoursForFaster`) now ranges from 1 to 3 game hours, in half hours on the settings page; it used to range from no minimum to 48 hours. A value outside the range in your settings file is replaced by the nearest allowed one, written back to the file, and noted in the log. Generally, a setting that cannot be used as written is now corrected in the file, so the file always says what the game does.
 - **0.2.1**: Tooltips on the settings page wrap at half the page's width, so the long one on the minimum travel time no longer runs off the screen. Settings file: the `[Panel]` section that 0.2.0 left behind in files from 0.0.10 or earlier, with two comment lines about the font, is now removed too. 0.2.0 had mistaken one of those comments (*Empty = the framework's font*) for an option and kept them; a comment now only counts as an option when it names a real one. Generally, a section no option of this version belongs to, and that holds no option any more, is removed with its leftover comments.
 - **0.2.0**: The panel in the game's own interface is now the only panel: the SKSE Menu Framework panel is gone, with its settings `bGameInterface`, `bMatchMapStyle` and `sFont`. The master switch `bEnabled` is merged into `bShowPanel`, which did the same; if you had switched the planner off with it, the panel stays off. These options are taken out of your settings file automatically, with their comments and the then empty `[Panel]` section; everything else stays as you set it. SKSE Menu Framework's page is now a settings page: the panel on or off, the minimum travel time for Instant, 1/3 and 1/2, and maps opened from a conversation, each saved to your settings file at once; the last planned trip and *Reload INI* stay.

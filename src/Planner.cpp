@@ -19,7 +19,8 @@
 // 4. Later arrivals are a normal trip; once the loading screen closes, the clock moves forward
 //    to the chosen hour.
 //
-// Prototype: every step writes to FastTravelArrivalPlanner.log so the tests can be read back.
+// The log (FastTravelArrivalPlanner.log) keeps a short summary of each trip; with bDetailedLog it
+// records every step as well.
 
 namespace FTAP::Planner
 {
@@ -93,6 +94,7 @@ namespace FTAP::Planner
 		std::atomic<long long> g_lastArrivalTicks{ 0 };  // Clock ticks; 0 = none yet
 		std::atomic<long long> g_timelineTicks{ 0 };     // when Proceed was pressed; 0 = none yet
 		std::atomic<long long> g_loadingOpenedTicks{ 0 };
+		std::atomic<bool>      g_loadingPlanned{ false };  // the loading screen open now started during a planned trip
 
 		long long NowTicks()
 		{
@@ -132,11 +134,11 @@ namespace FTAP::Planner
 			return std::format("{}{} h {:02} min", sign, total / 60, total % 60);
 		}
 
-		// "+1234 ms" since Proceed, for the timeline in the log.
+		// "+1234 ms" since Proceed, for the timeline in the detailed log (bDetailedLog).
 		std::string Stamp()
 		{
 			const auto start = g_timelineTicks.load();
-			if (start == 0) {
+			if (start == 0 || !spdlog::should_log(spdlog::level::debug)) {
 				return {};
 			}
 			return std::format("[+{} ms] ", std::llround(SecondsSince(start) * 1000.0));
@@ -195,7 +197,7 @@ namespace FTAP::Planner
 				return;
 			}
 			const auto option = static_cast<std::uint8_t>(a_box.offset + a_index);
-			logs::info("{}{}: passing button {} (\"{}\") to the game", Stamp(), a_label, a_index,
+			logs::debug("{}{}: passing button {} (\"{}\") to the game", Stamp(), a_label, a_index,
 				a_index < static_cast<int>(a_box.buttons.size()) ? a_box.buttons[static_cast<std::size_t>(a_index)] : "?"s);
 			a_box.callback->Run(option);
 		}
@@ -292,7 +294,7 @@ namespace FTAP::Planner
 			for (int i = 0; i < count; ++i) {
 				list += std::format("{}[{}] \"{}\"", i == 0 ? "" : ", ", i, box.buttons[static_cast<std::size_t>(i)]);
 			}
-			logs::info("  Buttons: {} (cancel index {}, press offset {}, warning type {})", list, data->cancelButtonIndex, box.offset, data->warningType);
+			logs::debug("  Buttons: {} (cancel index {}, press offset {}, warning type {})", list, data->cancelButtonIndex, box.offset, data->warningType);
 			if (count < 2 || box.cancel < 0 || box.yes >= count) {
 				logs::warn("  Unexpected buttons: the game's box stays");
 				return;
@@ -466,7 +468,7 @@ namespace FTAP::Planner
 				Execute(a_choice);
 				return;
 			}
-			logs::info("Waiting for the panel to close before carrying out the choice");
+			logs::debug("Waiting for the panel to close before carrying out the choice");
 			std::lock_guard guard{ g_lock };
 			g_pendingChoice = a_choice;
 			g_pendingFrames = 0;
@@ -507,7 +509,7 @@ namespace FTAP::Planner
 			}
 			std::array<char, 128> text{};
 			c->GetTimeDateString(text.data(), static_cast<std::uint32_t>(text.size()), true);
-			logs::info("[State: {}] {} | hour {:.3f}, day {}, month {}, year {}, days passed {:.5f} (raw {:.5f}, midnights {})",
+			logs::debug("[State: {}] {} | hour {:.3f}, day {}, month {}, year {}, days passed {:.5f} (raw {:.5f}, midnights {})",
 				a_label, text.data(), c->gameHour->value, c->gameDay->value, c->gameMonth->value, c->gameYear->value,
 				c->gameDaysPassed->value, c->rawDaysPassed, c->midnightsPassed);
 		}
@@ -782,7 +784,7 @@ namespace FTAP::Planner
 				// it could not read the confirmation at this moment, which undid every plan.
 				// If no trip follows, the setting is restored the next time the map opens, or
 				// when a game is loaded.
-				logs::info("{}Map closed ({}); keeping fFastTravelSpeedMult until the trip ends", Stamp(),
+				logs::debug("{}Map closed ({}); keeping fFastTravelSpeedMult until the trip ends", Stamp(),
 					g_trip->confirmed ? "fast travel confirmed" : "confirmation not seen");
 			}
 
@@ -795,16 +797,21 @@ namespace FTAP::Planner
 					std::lock_guard guard{ g_lock };
 					travelling = g_trip.has_value();
 				}
-				// Every loading screen's length is logged, planned trip or not, so trips with the
-				// panel switched off (bShowPanel = 0) can be compared with planned ones.
+				// A planned trip's loading screen is logged with its length. Every other one is in the
+				// detailed log only (bDetailedLog), so trips with the panel switched off can still be
+				// compared with planned ones.
+				// (The trip itself ends, for the game, before its loading screen closes.)
+				const bool planned = a_opening ? travelling : (travelling || g_loadingPlanned.exchange(false));
 				const auto stamp = g_timelineTicks.load() != 0 && (recent || travelling) ? Stamp() : std::string{};
+				const auto level = planned ? spdlog::level::info : spdlog::level::debug;
 				if (a_opening) {
 					g_loadingOpenedTicks = NowTicks();
-					logs::info("{}Loading screen opened", stamp);
+					g_loadingPlanned = travelling;
+					logs::debug("{}Loading screen opened{}", stamp, travelling ? "" : " (not a planned trip)");
 				} else if (const auto opened = g_loadingOpenedTicks.exchange(0); opened != 0) {
-					logs::info("{}Loading screen closed after {:.1f} s{}", stamp, SecondsSince(opened), travelling || recent ? "" : " (not a planned trip)");
+					spdlog::log(level, "{}Loading screen closed after {:.1f} s{}", stamp, SecondsSince(opened), planned ? "" : " (not a planned trip)");
 				} else {
-					logs::info("{}Loading screen closed", stamp);
+					spdlog::log(level, "{}Loading screen closed", stamp);
 				}
 				if (a_opening) {
 					return;
@@ -834,7 +841,7 @@ namespace FTAP::Planner
 						std::lock_guard guard{ g_lock };
 						if (g_trip && !g_trip->confirmed) {
 							g_trip->confirmed = true;
-							logs::info("{}The game confirmed the fast travel", Stamp());
+							logs::debug("{}The game confirmed the fast travel", Stamp());
 						}
 					}
 
@@ -844,7 +851,7 @@ namespace FTAP::Planner
 						if (g_pendingChoice && (Panel::IsReleased() || ++g_pendingFrames >= MAX_PENDING_FRAMES)) {
 							ready = g_pendingChoice;
 							g_pendingChoice.reset();
-							logs::info("The panel closed after {} map frame(s){}", g_pendingFrames,
+							logs::debug("The panel closed after {} map frame(s){}", g_pendingFrames,
 								g_pendingFrames >= MAX_PENDING_FRAMES ? " (stopped waiting)" : "");
 						}
 					}

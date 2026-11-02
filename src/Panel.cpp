@@ -525,7 +525,7 @@ namespace FTAP::Panel
 				if (cursor > 0) {
 					depth = (std::min)(depth, cursor - 1);
 				}
-				logs::info("Panel: menu depth {} (map {}, cursor {})", depth, map, cursor);
+				logs::debug("Panel: menu depth {} (map {}, cursor {})", depth, map, cursor);
 				return static_cast<std::int8_t>(depth);
 			}
 
@@ -626,11 +626,23 @@ namespace FTAP::Panel
 				m_top.reset();
 				m_inputLogged = 0;
 				m_inputSeen.clear();
-				logs::info("Panel: title {}; labels {}; values {}", Describe(m_look.title), Describe(m_look.label), Describe(m_look.value));
+				// The look is logged when it differs from the last panel's (once per session, as a
+				// rule), and with every panel in the detailed log.
+				static std::string s_lastLook;  // UI thread only
+				std::string look = std::format("Panel: title {}; labels {}; values {}", Describe(m_look.title), Describe(m_look.label), Describe(m_look.value));
 				if (m_look.title.fromFlyout) {
-					logs::info("Panel: rows from {}; background {}", m_look.rowsFrom,
+					look += std::format("\nPanel: rows from {}; background {}", m_look.rowsFrom,
 						m_look.background ? std::format("#{:06X} at {:.0f}%, corners {:g}", m_look.backgroundColor, m_look.backgroundAlpha, m_look.radius) : "off"s);
-				} else {
+				}
+				const bool changed = look != s_lastLook;
+				s_lastLook = look;
+				std::size_t from = 0;
+				while (from <= look.size()) {
+					const auto to = (std::min)(look.find('\n', from), look.size());
+					spdlog::log(changed ? spdlog::level::info : spdlog::level::debug, "{}", std::string_view(look).substr(from, to - from));
+					from = to + 1;
+				}
+				if (!m_look.title.fromFlyout) {
 					logs::warn("Panel: the map's flyout could not be read: default look");
 				}
 				Layout();
@@ -1085,7 +1097,7 @@ namespace FTAP::Panel
 				if (age >= INPUT_GUARD) {
 					return true;
 				}
-				logs::info("Panel: {} ignored, {} ms after the panel opened", a_what,
+				logs::debug("Panel: {} ignored, {} ms after the panel opened", a_what,
 					std::chrono::duration_cast<std::chrono::milliseconds>(age).count());
 				return false;
 			}
@@ -1281,7 +1293,7 @@ namespace FTAP::Panel
 				}
 				++m_inputLogged;
 				m_inputSeen.push_back(a_what);
-				logs::info("Panel: {} -> {}", a_what, CommandName(a_command));
+				logs::debug("Panel: {} -> {}", a_what, CommandName(a_command));
 			}
 
 			// Keys, as the movie receives them.

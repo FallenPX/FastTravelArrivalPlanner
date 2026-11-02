@@ -20,8 +20,4 @@ namespace FTAP::Link
 	// The map flyout's colours and FTTI's background settings. False (and defaults) with an
 	// FTTI older than 0.2.0.
 	bool GetFlyoutStyle(FTTI_API::FlyoutStyle& a_out);
-
-	// The flyout's font, text sizes and shadow. False (and defaults) with an FTTI older than
-	// 0.3.0, or before a flyout has been shown.
-	bool GetFlyoutText(FTTI_API::FlyoutText& a_out);
 }

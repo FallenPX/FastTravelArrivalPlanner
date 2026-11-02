@@ -18,12 +18,16 @@ namespace FTAP
 		float minHoursForFaster{ 1.0f };       // Instant, 1/3 and 1/2 need at least this ETA (1 to 3 game hours)
 		bool  skipAfterConversation{ true };   // map opened from a conversation: leave it to the game
 		float conversationSeconds{ 2.0f };     // "right after a conversation" window
+		bool  detailedLog{ false };            // every step of each trip in the log, for bug reports
 
 		[[nodiscard]] static std::shared_ptr<const Settings> Current();
 		// Bumped whenever the live settings are replaced (for the settings page's own copies).
 		[[nodiscard]] static std::uint32_t Version();
 		// Replaces the live settings (from the settings page).
 		static void Set(Settings a_settings);
+		// Called with the new settings whenever they are replaced (by Set or Reload).
+		using Listener = void (*)(const Settings&);
+		static void SetListener(Listener a_listener);
 		// Reads the player's settings file again (preparing it first).
 		static void Reload();
 		// Writes the given settings into the player's settings file. Comments, layout and

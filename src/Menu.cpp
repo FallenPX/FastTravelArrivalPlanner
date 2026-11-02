@@ -174,7 +174,7 @@ namespace FTAP::Menu
 				a_s, &Settings::skipAfterConversation);
 		}
 
-		void RenderLastTrip()
+		void RenderLastTrip(const Settings& a_s)
 		{
 			ImGuiMCP::SeparatorText("Last planned trip");
 			const auto lines = Planner::LastTripLines();
@@ -184,7 +184,9 @@ namespace FTAP::Menu
 			for (const auto& line : lines) {
 				ImGuiMCP::BulletText("%s", line.c_str());
 			}
-			ImGuiMCP::TextDisabled("%s", "Full details: FastTravelArrivalPlanner.log, next to your settings file.");
+			Toggle("Detailed log", "Records every step of each trip, the keys and inputs the panel receives, and details of its "
+				"layout in FastTravelArrivalPlanner.log (next to your settings file). Switch it on when reporting a problem; "
+				"off, the log keeps a short summary of each trip.", a_s, &Settings::detailedLog);
 		}
 
 		void RenderFile()
@@ -205,7 +207,7 @@ namespace FTAP::Menu
 				SyncBuffers(*Settings::Current());
 				RenderPanel(*Settings::Current());
 				ImGuiMCP::Spacing();
-				RenderLastTrip();
+				RenderLastTrip(*Settings::Current());
 				ImGuiMCP::Spacing();
 				RenderFile();
 				if (!g_message.empty() && ImGuiMCP::GetTime() < g_messageUntil) {

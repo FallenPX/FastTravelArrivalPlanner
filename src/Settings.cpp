@@ -19,6 +19,7 @@ namespace FTAP
 		std::mutex                      g_lock;
 		std::shared_ptr<const Settings> g_current = std::make_shared<const Settings>();
 		std::atomic<std::uint32_t>      g_version{ 1 };
+		std::atomic<Settings::Listener> g_listener{ nullptr };
 
 		std::string Trim(std::string_view a_str)
 		{
@@ -129,6 +130,7 @@ namespace FTAP
 				MakeFloat("fMinHoursForFaster", &Settings::minHoursForFaster, Settings::MIN_HOURS_FOR_FASTER, Settings::MAX_HOURS_FOR_FASTER),
 				MakeBool("bSkipAfterConversation", &Settings::skipAfterConversation),
 				MakeFloat("fConversationSeconds", &Settings::conversationSeconds, 0.0f, 30.0f),
+				MakeBool("bDetailedLog", &Settings::detailedLog),
 			};
 			return fields;
 		}
@@ -643,11 +645,20 @@ namespace FTAP
 	void Settings::Set(Settings a_settings)
 	{
 		auto next = std::make_shared<const Settings>(std::move(a_settings));
+		const auto current = next;
 		{
 			std::lock_guard guard{ g_lock };
 			g_current = std::move(next);
 		}
 		++g_version;
+		if (const auto listener = g_listener.load()) {
+			listener(*current);
+		}
+	}
+
+	void Settings::SetListener(Listener a_listener)
+	{
+		g_listener = a_listener;
 	}
 
 	std::string Settings::FilePath()
@@ -682,8 +693,8 @@ namespace FTAP
 		} else {
 			logs::info("No settings file at {}, using defaults", path.string());
 		}
-		logs::info("Settings: panel={} minHoursForFaster={:.2f} skipAfterConversation={} ({:.1f} s)",
-			loaded.showPanel, loaded.minHoursForFaster, loaded.skipAfterConversation, loaded.conversationSeconds);
+		logs::info("Settings: panel={} minHoursForFaster={:.2f} skipAfterConversation={} ({:.1f} s) detailedLog={}",
+			loaded.showPanel, loaded.minHoursForFaster, loaded.skipAfterConversation, loaded.conversationSeconds, loaded.detailedLog);
 		Set(loaded);
 		if (!misfits.empty()) {
 			// Out of range or unreadable: the value in use is written back, so the file says
