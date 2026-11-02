@@ -90,6 +90,7 @@ namespace FTAP
 			std::string_view                                    section;  // without brackets
 			std::function<void(Settings&, const std::string&)> parse;    // raw value, quotes already removed
 			std::function<std::string(const Settings&)>        format;   // value as it should be written
+			std::function<bool(const std::string&)>            fits;     // readable, and within the allowed range
 		};
 
 		Field MakeBool(std::string_view a_name, bool Settings::* a_member, std::string_view a_section = "General")
@@ -97,7 +98,8 @@ namespace FTAP
 			return Field{
 				a_name, a_section,
 				[a_member](Settings& a_s, const std::string& a_v) { a_s.*a_member = ToBool(a_v, a_s.*a_member); },
-				[a_member](const Settings& a_s) { return std::string(a_s.*a_member ? "1" : "0"); }
+				[a_member](const Settings& a_s) { return std::string(a_s.*a_member ? "1" : "0"); },
+				[](const std::string& a_v) { return ToBool(a_v, true) == ToBool(a_v, false); }
 			};
 		}
 
@@ -112,7 +114,11 @@ namespace FTAP
 						a_s.*a_member = std::clamp(v, a_min, a_max);
 					}
 				},
-				[a_member](const Settings& a_s) { return std::format("{:g}", a_s.*a_member); }
+				[a_member](const Settings& a_s) { return std::format("{:g}", a_s.*a_member); },
+				[a_min, a_max](const std::string& a_v) {
+					const auto v = ToFloat(a_v, std::numeric_limits<float>::quiet_NaN());
+					return std::isfinite(v) && v >= a_min && v <= a_max;
+				}
 			};
 		}
 
@@ -120,7 +126,7 @@ namespace FTAP
 		{
 			static const std::vector<Field> fields{
 				MakeBool("bShowPanel", &Settings::showPanel),
-				MakeFloat("fMinHoursForFaster", &Settings::minHoursForFaster, 0.0f, Settings::MAX_HOURS_FOR_FASTER),
+				MakeFloat("fMinHoursForFaster", &Settings::minHoursForFaster, Settings::MIN_HOURS_FOR_FASTER, Settings::MAX_HOURS_FOR_FASTER),
 				MakeBool("bSkipAfterConversation", &Settings::skipAfterConversation),
 				MakeFloat("fConversationSeconds", &Settings::conversationSeconds, 0.0f, 30.0f),
 			};
@@ -657,15 +663,19 @@ namespace FTAP
 			logs::warn("Could not prepare your settings file: {}", e.what());
 		}
 
-		Settings   loaded;
-		const auto path = UserPath();
-		const auto ini = ReadIni(path);
+		Settings                 loaded;
+		std::vector<std::string> misfits;  // values that cannot be used as written
+		const auto               path = UserPath();
+		const auto               ini = ReadIni(path);
 		if (ini.exists) {
 			logs::info("Settings file: {}", path.string());
 			for (const auto& line : ini.lines) {
 				if (const auto parsed = ParseKeyLine(line)) {
 					if (const auto field = FindField(parsed->key)) {
 						field->parse(loaded, parsed->value);
+						if (!field->fits(parsed->value)) {
+							misfits.push_back(std::format("{} = {}", field->name, parsed->value));
+						}
 					}
 				}
 			}
@@ -674,7 +684,14 @@ namespace FTAP
 		}
 		logs::info("Settings: panel={} minHoursForFaster={:.2f} skipAfterConversation={} ({:.1f} s)",
 			loaded.showPanel, loaded.minHoursForFaster, loaded.skipAfterConversation, loaded.conversationSeconds);
-		Set(std::move(loaded));
+		Set(loaded);
+		if (!misfits.empty()) {
+			// Out of range or unreadable: the value in use is written back, so the file says
+			// what the game does.
+			logs::warn("Setting(s) outside what this version allows: {}. Using the nearest allowed value (or the default) instead, and writing it to your settings file.",
+				JoinNames(misfits));
+			SaveToIni(loaded);
+		}
 	}
 
 	bool Settings::SaveToIni(const Settings& a_settings)
@@ -710,11 +727,12 @@ namespace FTAP
 			}
 			present[static_cast<std::size_t>(field - fields.data())] = true;
 
-			// Leave the line alone if it already means the same thing (e.g. "true" vs "1").
+			// Leave the line alone if it already means the same thing (e.g. "true" vs "1"), unless
+			// it only does so after being brought into range.
 			Settings existing = defaults;
 			field->parse(existing, parsed->value);
 			const auto wanted = field->format(a_settings);
-			if (field->format(existing) == wanted) {
+			if (field->format(existing) == wanted && field->fits(parsed->value)) {
 				continue;
 			}
 			std::string rebuilt = line.substr(0, parsed->valueStart);

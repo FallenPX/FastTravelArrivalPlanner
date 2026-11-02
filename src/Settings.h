@@ -10,10 +10,12 @@ namespace FTAP
 	// settings page and the planner can read them at any time.
 	struct Settings
 	{
-		static constexpr float MAX_HOURS_FOR_FASTER = 48.0f;
+		// The range of minHoursForFaster, in game hours.
+		static constexpr float MIN_HOURS_FOR_FASTER = 1.0f;
+		static constexpr float MAX_HOURS_FOR_FASTER = 3.0f;
 
 		bool  showPanel{ true };               // 0 = always use the game's own confirmation box
-		float minHoursForFaster{ 1.0f };       // Instant, 1/3 and 1/2 need at least this ETA (0 = no limit)
+		float minHoursForFaster{ 1.0f };       // Instant, 1/3 and 1/2 need at least this ETA (1 to 3 game hours)
 		bool  skipAfterConversation{ true };   // map opened from a conversation: leave it to the game
 		float conversationSeconds{ 2.0f };     // "right after a conversation" window
 

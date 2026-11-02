@@ -32,8 +32,9 @@ namespace FTAP::Menu
 		constexpr auto   SECTION_NAME = "Fast Travel Arrival Planner";
 		constexpr auto   PAGE_NAME = "Settings";
 		constexpr double MESSAGE_SECONDS = 4.0;
-		constexpr int    STEPS_PER_HOUR = 2;   // the slider moves in half hours
-		constexpr int    SLIDER_HOURS = 24;    // the INI takes up to Settings::MAX_HOURS_FOR_FASTER
+		constexpr int    STEPS_PER_HOUR = 2;  // the slider moves in half hours
+		constexpr int    MIN_STEPS = static_cast<int>(Settings::MIN_HOURS_FOR_FASTER) * STEPS_PER_HOUR;
+		constexpr int    MAX_STEPS = static_cast<int>(Settings::MAX_HOURS_FOR_FASTER) * STEPS_PER_HOUR;
 
 		int           g_minimumBuffer{ 2 };  // in half hours
 		int           g_minimumSynced{ 2 };
@@ -49,7 +50,7 @@ namespace FTAP::Menu
 
 		int ToSteps(float a_hours)
 		{
-			return std::clamp(static_cast<int>(std::lround(a_hours * STEPS_PER_HOUR)), 0, SLIDER_HOURS * STEPS_PER_HOUR);
+			return std::clamp(static_cast<int>(std::lround(a_hours * STEPS_PER_HOUR)), MIN_STEPS, MAX_STEPS);
 		}
 
 		// The slider keeps its own value while it is dragged; refresh it whenever the live
@@ -67,9 +68,6 @@ namespace FTAP::Menu
 		// "1 h 30 min", in Fast Travel Time Info's units when it is there.
 		std::string Duration(double a_hours)
 		{
-			if (a_hours <= 0.0) {
-				return "no minimum";
-			}
 			if (auto text = Link::FormatDuration(a_hours, false); !text.empty()) {
 				return text;
 			}
@@ -145,17 +143,18 @@ namespace FTAP::Menu
 			}
 
 			ImGuiMCP::BeginDisabled(!a_s.showPanel);
-			// While the slider is untouched it shows the value in use, even one outside its range.
+			// While the slider is untouched it shows the value in use (one typed into the INI
+			// between the half hours, say).
 			const bool untouched = g_minimumBuffer == g_minimumSynced;
 			const auto shown = untouched ? static_cast<double>(a_s.minHoursForFaster) : static_cast<double>(g_minimumBuffer) / STEPS_PER_HOUR;
 			const auto format = Escaped(Duration(shown));
 			ImGuiMCP::SetNextItemWidth(220.0f);
-			ImGuiMCP::SliderInt("Instant, 1/3 and 1/2 from", &g_minimumBuffer, 0, SLIDER_HOURS * STEPS_PER_HOUR, format.c_str(),
+			ImGuiMCP::SliderInt("Instant, 1/3 and 1/2 from", &g_minimumBuffer, MIN_STEPS, MAX_STEPS, format.c_str(),
 				ImGuiMCP::ImGuiSliderFlags_AlwaysClamp | ImGuiMCP::ImGuiSliderFlags_NoInput);
 			const bool minimumCommitted = ImGuiMCP::IsItemDeactivatedAfterEdit();
-			Tooltip("The faster arrivals are offered only for trips whose normal travel time is at least this long, in game time. "
-					"Travel times grow with the timescale: at the default timescale of 20 a trip takes 2.5 times as many game hours "
-					"as at 8. Far left: no minimum.");
+			Tooltip("The faster arrivals are offered only for trips whose normal travel time is at least this long, in game "
+					"time: from 1 to 3 hours, in half hours. Travel times grow with the timescale: at the default timescale of 20 "
+					"a trip takes 2.5 times as many game hours as at 8.");
 			if (minimumCommitted) {
 				Settings next = a_s;
 				next.minHoursForFaster = static_cast<float>(g_minimumBuffer) / STEPS_PER_HOUR;
