@@ -199,8 +199,26 @@ namespace FTAP::Panel
 		// for again: the framework logs a warning every time it is asked for an unknown font.
 		std::set<std::string> g_fontsWithoutEffect;
 
+		// The name SKSE Menu Framework gave a loaded font ("" when unknown).
+		std::string FontName(const ImGuiMCP::ImFont* a_font)
+		{
+			if (!a_font || !a_font->ConfigData) {
+				return {};
+			}
+			const auto& name = a_font->ConfigData->Name;
+			const auto  end = std::find(std::begin(name), std::end(name), '\0');
+			return std::string(std::begin(name), end);
+		}
+
+		std::string Lowercase(std::string a_text)
+		{
+			std::ranges::transform(a_text, a_text.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			return a_text;
+		}
+
 		// Asks SKSE Menu Framework for a font by name. Undone with FontAwesome::Pop, the framework's
-		// call that clears every font pushed this frame.
+		// call that clears every font pushed this frame. Only a font whose own name contains the one
+		// asked for counts: some framework versions hand back their default font instead.
 		bool PushFontByName(const std::string& a_name)
 		{
 			if (a_name.empty() || g_fontsWithoutEffect.contains(a_name)) {
@@ -216,12 +234,18 @@ namespace FTAP::Panel
 			}
 			const auto before = ImGuiMCP::GetFont();
 			SKSEMenuFramework::PushFont(a_name);
-			if (ImGuiMCP::GetFont() != before) {
+			const auto after = ImGuiMCP::GetFont();
+			const auto got = FontName(after);
+			if (after != before && (got.empty() || Lowercase(got).find(Lowercase(a_name)) != std::string::npos)) {
 				return true;
 			}
 			FontAwesome::Pop();
 			g_fontsWithoutEffect.insert(a_name);
-			logs::info("Panel: SKSE Menu Framework has no separate font named \"{}\"; using the current one", a_name);
+			if (after == before) {
+				logs::info("Panel: SKSE Menu Framework has no separate font named \"{}\"; using the current one (\"{}\")", a_name, FontName(before));
+			} else {
+				logs::info("Panel: SKSE Menu Framework has no font named \"{}\" (it offered \"{}\"); using its own font", a_name, got);
+			}
 			return false;
 		}
 
@@ -583,8 +607,8 @@ namespace FTAP::Panel
 						const float base = ImGuiMCP::GetFontSize();
 						if (!g_ui.sizesLogged) {
 							g_ui.sizesLogged = true;
-							logs::info("Panel sizes: framework font {:.1f} px; title {:.1f} px (x{:.2f}), rows {:.1f} px (x{:.2f})", base,
-								look.titleSize, ScaleFor(look.titleSize, base), look.rowSize, ScaleFor(look.rowSize, base));
+							logs::info("Panel sizes: font \"{}\" {:.1f} px; title {:.1f} px (x{:.2f}), rows {:.1f} px (x{:.2f})",
+								FontName(ImGuiMCP::GetFont()), base, look.titleSize, ScaleFor(look.titleSize, base), look.rowSize, ScaleFor(look.rowSize, base));
 						}
 						ImGuiMCP::SetWindowFontScale(ScaleFor(look.rowSize, base));
 					}

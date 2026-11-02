@@ -62,6 +62,7 @@ Your settings live in `Documents\My Games\Skyrim Special Edition\SKSE\FastTravel
 
 ## Changelog
 
+- **0.0.14**: The panel uses the flyout's font only if SKSE Menu Framework really hands back that font (some versions hand back their own instead), and the log names the font actually used.
 - **0.0.13**: With Fast Travel Time Info 0.3.2 the panel's text matches the flyout's size (the heading as large as the location name). When the flyout's shadow cannot be read, the panel draws one like the vanilla and Dear Diary flyouts: black, 2 map pixels down and to the right, with a soft edge.
 - **0.0.12**: With Fast Travel Time Info 0.3.1: text sizes that cannot be right are ignored instead of shrinking the panel, the text shadow is only left out when the flyout really has none, and the log line *Panel sizes* shows how the sizes were worked out.
 - **0.0.11**: The panel's background is exactly Fast Travel Time Info's, including none when its background is off (0.0.8 to 0.0.10 kept at least half opacity, and 75% without one). Only tooltips keep a background.
