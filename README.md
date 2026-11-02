@@ -11,13 +11,13 @@ Time only ever moves forward. Proceed with untouched settings is exactly a norma
 - SKSE64 matching your game version
 - Address Library for SKSE Plugins (All in one)
 - **Fast Travel Time Info 0.1.4 or newer** (0.2.0 or newer recommended: the panel then matches the map's flyout)
-- SKSE Menu Framework: optional. It adds the status page, and the older panel drawn by the framework (`bGameInterface = 0`).
+- SKSE Menu Framework: optional. It adds an in-game settings page.
 
 Without Fast Travel Time Info 0.1.4+, the planner stays inactive and the game's own box is used.
 
 ## The panel
 
-By default the game's own interface draws the panel, as it draws the map: the panel takes the font, text sizes, colours and text shadow of the map's location flyout, from whatever interface mod draws that flyout, and Fast Travel Time Info's background settings, including none when its background is off. The cursor is the game's, so an interface mod's cursor stays. The panel's movie, `Interface\FastTravelArrivalPlanner.swf`, is an empty stage that ships with the mod; the plugin builds the panel on it when it opens.
+The game's own interface draws the panel, as it draws the map: the panel takes the font, text sizes, colours and text shadow of the map's location flyout, from whatever interface mod draws that flyout, and Fast Travel Time Info's background settings, including none when its background is off. The cursor is the game's, so an interface mod's cursor stays. The panel's movie, `Interface\FastTravelArrivalPlanner.swf`, is an empty stage that ships with the mod; the plugin builds the panel on it when it opens.
 
 - Mouse: click a timing choice, drag the Day and Hour sliders (or click the track), then Proceed, Place Marker or Cancel.
 - Keyboard: Left and Right choose the timing, Up and Down the hour, Page Up and Page Down the day; Enter proceeds; Escape or Tab cancels. The game's own inputs work too (its Accept, Cancel, Up, Down, Left, Right, page inputs), so key bindings and a controller should follow; a press that arrives both ways counts once.
@@ -32,26 +32,22 @@ By default the game's own interface draws the panel, as it draws the map: the pa
 
 ## Prototype tests
 
-For each trip, the **status page** shows the last planned trip (with SKSE Menu Framework installed): SKSE Menu Framework, then *Fast Travel Arrival Planner*, then *Status*. Full details are in `Documents\My Games\Skyrim Special Edition\SKSE\FastTravelArrivalPlanner.log`.
+For each trip, the settings page (with SKSE Menu Framework installed) shows the last planned trip: SKSE Menu Framework, then *Fast Travel Arrival Planner*, then *Settings*. Full details are in `Documents\My Games\Skyrim Special Edition\SKSE\FastTravelArrivalPlanner.log`.
 
-Already confirmed: all timing options arrive on time (Instant at 0 minutes, 1/3 and 1/2 within a few minutes, Later to the minute, including into a new year); the two mods talk to each other; the panel replaces the box, and Proceed, Cancel and Place Marker work; Solstheim works; trips to and from the Forgotten Vale and Fort Dawnguard work, with the panel on and off; loading times are normal.
+Already confirmed: all timing options arrive on time (Instant at 0 minutes, 1/3 and 1/2 within a few minutes, Later to the minute, including into a new year); the two mods talk to each other; the panel replaces the box, and Proceed, Cancel and Place Marker work; Solstheim works; trips to and from the Forgotten Vale and Fort Dawnguard work, with the panel on and off; loading times are normal. The panel in the game's own interface (0.1.0 and later) has the interface mod's cursor, sharp text matching the flyout (size measured on screenshots), Fast Travel Time Info's background on and off, and works with the mouse and the keyboard (arrows, W/S, Page Up/Page Down, Enter, Escape, Tab).
 
 Still open:
 
-1. **The panel in the game's own interface (0.1.0).**
-   - Is the cursor the interface mod's (Dear Diary's) over the panel?
-   - Is the text sharp, and do font, sizes, colours and shadow match the flyout? The log lines *Game panel: title ... labels ... values* show what was copied.
-   - Background: on, and off in Fast Travel Time Info's settings.
-   - Mouse: the timing choices, both sliders (drag and click), every button.
-   - Keyboard: Left/Right, Up/Down, Page Up/Page Down, Enter, Escape, Tab.
-   - Controller, if you have one: the log lists each key and input the panel receives once per panel, with what it did (*Game panel: key 9 -> Cancel*, *Game panel: input "Cancel" -> Cancel*), so any button that does nothing can be mapped.
-   - `bGameInterface = 0` should bring back the SKSE Menu Framework panel.
-2. **Does the planner stay out of other travel?**
+1. **The settings page and your settings file (0.2.0).**
+   - Your settings file loses `bEnabled`, `bGameInterface`, `bMatchMapStyle`, `sFont` and the then empty `[Panel]` section, and keeps everything else as you set it. The log says what was removed.
+   - Each change on the settings page takes effect at once and lands in your settings file; it is still there after a restart.
+2. **Controller**, if you have one: the log lists each key and input the panel receives once per panel, with what it did (*Panel: key 9 -> Cancel*), so any button that does nothing can be mapped.
+3. **Does the planner stay out of other travel?**
    - Take a carriage: no panel should appear.
    - If you use a mod that opens the map from a conversation, check that no panel appears there either. The log says *Map opened from a conversation*.
-3. **Panel details.**
+4. **Panel details.**
    - Does the game's own box ever flash briefly before the panel?
-4. **Fort Dawnguard with Fast Travel Time Info 0.1.9.** Trips into and out of it now have an approximate estimate, so the panel offers every option there. Try 1/3 or Later once.
+5. **Fort Dawnguard with Fast Travel Time Info 0.1.9.** Trips into and out of it now have an approximate estimate, so the panel offers every option there. Try 1/3 or Later once.
 
 Please send back both log files: `FastTravelArrivalPlanner.log` and `FastTravelTimeInfo.log`.
 
@@ -61,13 +57,13 @@ Exactly as for Fast Travel Time Info: double-click **`build.bat`** (option A in 
 
 ## Settings
 
-Your settings live in `Documents\My Games\Skyrim Special Edition\SKSE\FastTravelArrivalPlanner.ini`, so updates never replace them. The plugin creates that file from the defaults (`Data\SKSE\Plugins\FastTravelArrivalPlanner.ini`) the first time, and copies in any option a newer version adds. In this prototype, the page in SKSE Menu Framework (if installed) is a status page with a *Reload INI* button.
+Your settings live in `Documents\My Games\Skyrim Special Edition\SKSE\FastTravelArrivalPlanner.ini`, so updates never replace them. The plugin creates that file from the defaults (`Data\SKSE\Plugins\FastTravelArrivalPlanner.ini`) the first time. After an update it copies in any option the new version adds, with its explanation, and takes out any option the new version no longer uses; everything else in the file stays as you set it, including your comments.
 
-- **`bShowPanel = 0`** brings back the game's own box, in case another interface mod conflicts.
-- **`fMinHoursForFaster`** sets the 1-hour threshold for Instant, 1/3 and 1/2. 0 removes the limit.
-- **`bGameInterface`** (on by default): the game's own interface draws the panel (see *The panel*). 0 uses the SKSE Menu Framework panel instead. Whichever is chosen, the other is used if the chosen one is not available.
-- **`bMatchMapStyle`** (SKSE Menu Framework panel only, on by default): the panel looks like the map's location flyout as far as the framework can draw it: colours, font, text sizes and text shadow from the flyout, and Fast Travel Time Info's background. The font is used only if SKSE Menu Framework has it. 0 uses SKSE Menu Framework's own theme.
-- **`sFont`** (SKSE Menu Framework panel only): a font by the name SKSE Menu Framework lists in its own settings. Empty means the flyout's font (if the framework has it), otherwise the framework's font.
+With SKSE Menu Framework installed, its *Fast Travel Arrival Planner* page changes the settings in the game. Each change takes effect at once and is saved to that same file. *Reload INI* reads the file again after you edit it by hand.
+
+- **`bShowPanel`** (on by default): clicking a destination on the world map opens the arrival panel. 0 brings back the game's own box, in case another interface mod conflicts.
+- **`fMinHoursForFaster`** (1 hour by default): Instant, 1/3 and 1/2 are offered only when the normal travel time is at least this many game hours. 0 removes the limit. Travel times grow with the timescale: at the default timescale of 20, a trip takes 2.5 times as many game hours as at 8. The settings page slides from 0 to 24 hours in half hours; the INI takes up to 48.
+- **`bSkipAfterConversation`** (on by default): a map opened from a conversation is left to the game. **`fConversationSeconds`** (INI only) sets how soon after a conversation a map still counts as opened from it.
 
 ## Credits
 
@@ -77,6 +73,7 @@ Your settings live in `Documents\My Games\Skyrim Special Edition\SKSE\FastTravel
 
 ## Changelog
 
+- **0.2.0**: The panel in the game's own interface is now the only panel: the SKSE Menu Framework panel is gone, with its settings `bGameInterface`, `bMatchMapStyle` and `sFont`. The master switch `bEnabled` is merged into `bShowPanel`, which did the same; if you had switched the planner off with it, the panel stays off. These options are taken out of your settings file automatically, with their comments and the then empty `[Panel]` section; everything else stays as you set it. SKSE Menu Framework's page is now a settings page: the panel on or off, the minimum travel time for Instant, 1/3 and 1/2, and maps opened from a conversation, each saved to your settings file at once; the last planned trip and *Reload INI* stay.
 - **0.1.1**: Keyboard and controller: the panel also follows the game's own inputs (Accept, Cancel, Up, Down, Left, Right and the page inputs), and a press that arrives both as a key and as an input counts once. Numpad Enter proceeds. When the flyout has no rows to copy (the Forgotten Vale, for one), the panel's rows keep the look of an earlier flyout instead of the title's font. The log lists each key and input once per panel with what it did.
 - **0.1.0**: The panel is now drawn by the game's own interface, like the map: sharp text in the flyout's own font, sizes, colours and text shadow (copied from the flyout as the game draws it), Fast Travel Time Info's background, and the game's cursor, so an interface mod's cursor stays. Keyboard: Left/Right for the timing, Up/Down for the hour, Page Up/Page Down for the day, Enter to proceed, Escape or Tab to cancel. When Instant, 1/3 and 1/2 are greyed out, a line under them says why. SKSE Menu Framework is now optional: `bGameInterface = 0` (new, in `[Panel]`) brings back its panel, and it still provides the status page. The mod now includes `Interface\FastTravelArrivalPlanner.swf`.
 - **0.0.14**: The panel uses the flyout's font only if SKSE Menu Framework really hands back that font (some versions hand back their own instead), and the log names the font actually used.

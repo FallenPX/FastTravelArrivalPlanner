@@ -1,6 +1,7 @@
 #include "pch.h"
 
 #include "Link.h"
+#include "Menu.h"
 #include "Panel.h"
 #include "Planner.h"
 #include "Settings.h"
@@ -15,7 +16,7 @@ namespace
 		switch (a_message->type) {
 		case SKSE::MessagingInterface::kPostLoad:
 			// Every SKSE plugin is loaded by now, so SKSE Menu Framework can be found.
-			FTAP::Panel::Register();
+			FTAP::Menu::Register();
 			break;
 		case SKSE::MessagingInterface::kDataLoaded:
 			// Fast Travel Time Info has sent its interface by now (it does so at kPostLoad).
@@ -24,7 +25,7 @@ namespace
 			} else {
 				logs::error("{}. The planner stays inactive and the game's own box is used.", FTAP::Link::Describe());
 			}
-			FTAP::Panel::RegisterGameInterface();
+			FTAP::Panel::Register();
 			FTAP::Planner::Install();
 			break;
 		case SKSE::MessagingInterface::kPreLoadGame:

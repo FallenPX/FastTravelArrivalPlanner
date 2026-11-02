@@ -1,25 +1,21 @@
 #pragma once
 
-// The arrival panel, drawn by the game's own interface (by default) or by SKSE Menu
-// Framework. Which one is decided each time a panel opens (the INI's bGameInterface, and
-// which of the two is available).
+// The arrival panel, built in the game's own interface: a game menu (like the map or the game's
+// message boxes) whose movie, Interface/FastTravelArrivalPlanner.swf, is an empty stage. The
+// panel is built on it at runtime with the same text style as the map's location flyout, so
+// the game draws it with the interface mod's font, sizes, colours, shadow and cursor.
+
 namespace FTAP::Panel
 {
-	// Creates the SKSE Menu Framework panel window and the status page.
-	// Call once every plugin has loaded (kPostLoad). Returns false without the framework.
+	// Registers the menu with the game (once the game's data has loaded, kDataLoaded). False
+	// when the movie file is missing, in which case the game's own box is used.
 	bool Register();
-	// Registers the panel in the game's own interface. Call once the game's data has loaded
-	// (kDataLoaded). Returns false when its movie file is missing.
-	bool RegisterGameInterface();
-
-	// Either panel can be shown.
 	[[nodiscard]] bool IsAvailable();
-	// The panel opened last is asked to be open, or is open.
+
+	void Open();
+	void Close();
+	// Asked to open, or open.
 	[[nodiscard]] bool IsOpen();
-	// True once the panel opened last has fully let go of the screen and the game's input.
+	// Fully closed: the game no longer has the menu.
 	[[nodiscard]] bool IsReleased();
-	// Which one draws the panel opened last, for the log.
-	[[nodiscard]] std::string_view Name();
-	void               Open();
-	void               Close();
 }

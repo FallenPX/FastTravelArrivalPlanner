@@ -18,6 +18,7 @@ namespace FTAP
 
 		std::mutex                      g_lock;
 		std::shared_ptr<const Settings> g_current = std::make_shared<const Settings>();
+		std::atomic<std::uint32_t>      g_version{ 1 };
 
 		std::string Trim(std::string_view a_str)
 		{
@@ -115,26 +116,13 @@ namespace FTAP
 			};
 		}
 
-		Field MakeString(std::string_view a_name, std::string Settings::* a_member, std::string_view a_section)
-		{
-			return Field{
-				a_name, a_section,
-				[a_member](Settings& a_s, const std::string& a_v) { a_s.*a_member = a_v; },
-				[a_member](const Settings& a_s) { return "\"" + a_s.*a_member + "\""; }
-			};
-		}
-
 		const std::vector<Field>& Fields()
 		{
 			static const std::vector<Field> fields{
-				MakeBool("bEnabled", &Settings::enabled),
 				MakeBool("bShowPanel", &Settings::showPanel),
-				MakeFloat("fMinHoursForFaster", &Settings::minHoursForFaster, 0.0f, 48.0f),
+				MakeFloat("fMinHoursForFaster", &Settings::minHoursForFaster, 0.0f, Settings::MAX_HOURS_FOR_FASTER),
 				MakeBool("bSkipAfterConversation", &Settings::skipAfterConversation),
 				MakeFloat("fConversationSeconds", &Settings::conversationSeconds, 0.0f, 30.0f),
-				MakeBool("bGameInterface", &Settings::gameInterface, "Panel"),
-				MakeBool("bMatchMapStyle", &Settings::matchMapStyle, "Panel"),
-				MakeString("sFont", &Settings::font, "Panel"),
 			};
 			return fields;
 		}
@@ -289,7 +277,13 @@ namespace FTAP
 
 		// Options a newer version dropped (lower case). They are taken out of the player's file,
 		// with the comment lines right above them that were copied from the defaults.
-		constexpr std::array OBSOLETE_KEYS{ "blaterbyclock"sv };  // 0.0.9: Later always moves the clock
+		constexpr std::array OBSOLETE_KEYS{
+			"blaterbyclock"sv,   // 0.0.9: Later always moves the clock
+			"benabled"sv,        // 0.2.0: merged into bShowPanel (see MigrateMasterSwitch)
+			"bgameinterface"sv,  // 0.2.0: the panel is always drawn by the game's own interface
+			"bmatchmapstyle"sv,  // 0.2.0: with the SKSE Menu Framework panel
+			"sfont"sv,           // 0.2.0: with the SKSE Menu Framework panel
+		};
 
 		// Looks like an option name ("blaterbyclock"), not prose such as "1 = a normal trip".
 		bool IsOptionName(const std::string& a_key)
@@ -339,16 +333,85 @@ namespace FTAP
 				// Comments only count as its own when the option ends their block; otherwise they
 				// explain the option that follows. One of the blank lines around it goes too, so
 				// no double blank line is left.
-				const bool blankAfter = i + 1 >= a_ini.lines.size() || Trim(a_ini.lines[i + 1]).empty();
+				const bool  blankAfter = i + 1 >= a_ini.lines.size() || Trim(a_ini.lines[i + 1]).empty();
+				std::size_t last = i;
 				if (!blankAfter) {
 					first = i;
 				} else if (first > 0 && Trim(a_ini.lines[first - 1]).empty()) {
 					--first;
+				} else if (i + 1 < a_ini.lines.size() && (first == 0 || SectionName(a_ini.lines[first - 1]))) {
+					++last;  // first in its section: the blank line after it goes instead
 				}
 				auto name = Trim(std::string_view(a_ini.lines[i]).substr(0, a_ini.lines[i].find('=')));
 				name.erase(0, (std::min)(name.size(), name.find_first_not_of(";# \t")));
 				removed.push_back(std::move(name));
-				a_ini.lines.erase(a_ini.lines.begin() + static_cast<std::ptrdiff_t>(first), a_ini.lines.begin() + static_cast<std::ptrdiff_t>(i + 1));
+				a_ini.lines.erase(a_ini.lines.begin() + static_cast<std::ptrdiff_t>(first), a_ini.lines.begin() + static_cast<std::ptrdiff_t>(last + 1));
+				i = first;
+			}
+			return removed;
+		}
+
+		// 0.2.0 merged the master switch (bEnabled) into bShowPanel, which did the same. A player
+		// who had switched the planner off with it keeps it off.
+		bool MigrateMasterSwitch(IniFile& a_ini)
+		{
+			std::optional<std::size_t> enabledLine;
+			std::optional<std::size_t> panelLine;
+			bool                       off = false;
+			for (std::size_t i = 0; i < a_ini.lines.size(); ++i) {
+				const auto parsed = ParseKeyLine(a_ini.lines[i]);
+				if (!parsed) {
+					continue;
+				}
+				if (parsed->key == "benabled") {
+					enabledLine = i;
+					off = !ToBool(parsed->value, true);
+				} else if (parsed->key == "bshowpanel") {
+					panelLine = i;
+				}
+			}
+			if (!off || !enabledLine) {
+				return false;
+			}
+			if (panelLine) {
+				auto&      line = a_ini.lines[*panelLine];
+				const auto parsed = ParseKeyLine(line);
+				line = line.substr(0, parsed->valueStart) + (parsed->valueStart == parsed->valueEnd && line.ends_with('=') ? " 0" : "0") +
+				       line.substr(parsed->valueEnd);
+			} else {
+				a_ini.lines[*enabledLine] = "bShowPanel = 0";
+			}
+			return true;
+		}
+
+		// Sections left without a single line (their options were all dropped), with the blank
+		// line that separated them.
+		std::vector<std::string> RemoveEmptySections(IniFile& a_ini)
+		{
+			std::vector<std::string> removed;
+			for (std::size_t i = 0; i < a_ini.lines.size();) {
+				if (!SectionName(a_ini.lines[i])) {
+					++i;
+					continue;
+				}
+				std::size_t end = i + 1;
+				bool        empty = true;
+				while (end < a_ini.lines.size() && !SectionName(a_ini.lines[end])) {
+					if (!Trim(a_ini.lines[end]).empty()) {
+						empty = false;
+					}
+					++end;
+				}
+				if (!empty) {
+					i = end;
+					continue;
+				}
+				std::size_t first = i;
+				if (end >= a_ini.lines.size() && first > 0 && Trim(a_ini.lines[first - 1]).empty()) {
+					--first;  // at the end of the file: the blank line above it goes too
+				}
+				removed.push_back(Trim(a_ini.lines[i]));
+				a_ini.lines.erase(a_ini.lines.begin() + static_cast<std::ptrdiff_t>(first), a_ini.lines.begin() + static_cast<std::ptrdiff_t>(end));
 				i = first;
 			}
 			return removed;
@@ -408,14 +471,23 @@ namespace FTAP
 				}
 				return;
 			}
+			const bool migrated = MigrateMasterSwitch(mine);
 			const auto removed = RemoveObsolete(mine);
+			const auto emptied = RemoveEmptySections(mine);
+			const bool tidied = migrated || !removed.empty() || !emptied.empty();
 			const auto logRemoved = [&]() {
+				if (migrated) {
+					logs::info("bEnabled = 0 from an earlier version: the arrival panel stays off (bShowPanel = 0)");
+				}
 				if (!removed.empty()) {
 					logs::info("Removed option(s) this version no longer uses from your settings file: {}", JoinNames(removed));
 				}
+				if (!emptied.empty()) {
+					logs::info("Removed section(s) left empty from your settings file: {}", JoinNames(emptied));
+				}
 			};
 			if (!defaults.exists) {
-				if (!removed.empty() && WriteIni(user, mine)) {
+				if (tidied && WriteIni(user, mine)) {
 					logRemoved();
 				}
 				return;
@@ -493,7 +565,7 @@ namespace FTAP
 				comments.clear();
 			}
 			if (additions.empty()) {
-				if (!removed.empty() && WriteIni(user, mine)) {
+				if (tidied && WriteIni(user, mine)) {
 					logRemoved();
 				}
 				return;
@@ -547,6 +619,21 @@ namespace FTAP
 		return g_current;
 	}
 
+	std::uint32_t Settings::Version()
+	{
+		return g_version.load();
+	}
+
+	void Settings::Set(Settings a_settings)
+	{
+		auto next = std::make_shared<const Settings>(std::move(a_settings));
+		{
+			std::lock_guard guard{ g_lock };
+			g_current = std::move(next);
+		}
+		++g_version;
+	}
+
 	std::string Settings::FilePath()
 	{
 		return UserPath().string();
@@ -575,11 +662,121 @@ namespace FTAP
 		} else {
 			logs::info("No settings file at {}, using defaults", path.string());
 		}
-		logs::info("Settings: enabled={} panel={} minHoursForFaster={:.2f} skipAfterConversation={} ({:.1f} s) gameInterface={} matchMapStyle={} font=\"{}\"",
-			loaded.enabled, loaded.showPanel, loaded.minHoursForFaster, loaded.skipAfterConversation,
-			loaded.conversationSeconds, loaded.gameInterface, loaded.matchMapStyle, loaded.font);
-		auto next = std::make_shared<const Settings>(std::move(loaded));
-		std::lock_guard guard{ g_lock };
-		g_current = std::move(next);
+		logs::info("Settings: panel={} minHoursForFaster={:.2f} skipAfterConversation={} ({:.1f} s)",
+			loaded.showPanel, loaded.minHoursForFaster, loaded.skipAfterConversation, loaded.conversationSeconds);
+		Set(std::move(loaded));
+	}
+
+	bool Settings::SaveToIni(const Settings& a_settings)
+	{
+		const auto     path = UserPath();
+		auto           ini = ReadIni(path);
+		const Settings defaults;
+		const auto&    fields = Fields();
+
+		std::vector<bool>                  present(fields.size(), false);
+		std::map<std::string, std::size_t> sectionLastLine;  // lower-case section -> last line index
+		std::string                        section;
+		bool                               changed = false;
+
+		for (std::size_t i = 0; i < ini.lines.size(); ++i) {
+			auto& line = ini.lines[i];
+			if (const auto name = SectionName(line)) {
+				section = *name;
+				sectionLastLine[section] = i;
+				continue;
+			}
+			if (!Trim(line).empty()) {
+				sectionLastLine[section] = i;
+			}
+
+			const auto parsed = ParseKeyLine(line);
+			if (!parsed) {
+				continue;
+			}
+			const auto field = FindField(parsed->key);
+			if (!field) {
+				continue;
+			}
+			present[static_cast<std::size_t>(field - fields.data())] = true;
+
+			// Leave the line alone if it already means the same thing (e.g. "true" vs "1").
+			Settings existing = defaults;
+			field->parse(existing, parsed->value);
+			const auto wanted = field->format(a_settings);
+			if (field->format(existing) == wanted) {
+				continue;
+			}
+			std::string rebuilt = line.substr(0, parsed->valueStart);
+			if (parsed->valueStart == parsed->valueEnd && !rebuilt.empty() && rebuilt.back() == '=') {
+				rebuilt += ' ';
+			}
+			rebuilt += wanted;
+			rebuilt += line.substr(parsed->valueEnd);
+			line = std::move(rebuilt);
+			changed = true;
+		}
+
+		// Keys that are not in the file yet: add them only if they differ from the default,
+		// so a deliberately commented-out line keeps meaning "use the default".
+		std::map<std::string, std::vector<std::string>> additions;  // section -> new lines
+		std::vector<std::string>                        sectionOrder;
+		for (std::size_t i = 0; i < fields.size(); ++i) {
+			if (present[i]) {
+				continue;
+			}
+			const auto value = fields[i].format(a_settings);
+			if (value == fields[i].format(defaults)) {
+				continue;
+			}
+			const auto key = Lower(std::string(fields[i].section));
+			if (!additions.contains(key)) {
+				sectionOrder.push_back(key);
+			}
+			additions[key].push_back(std::format("{} = {}", fields[i].name, value));
+		}
+
+		if (!additions.empty()) {
+			changed = true;
+
+			// Insert into existing sections, last section first so earlier indices stay valid.
+			std::vector<std::pair<std::size_t, std::string>> inserts;
+			for (const auto& key : sectionOrder) {
+				if (const auto it = sectionLastLine.find(key); it != sectionLastLine.end() && !key.empty()) {
+					inserts.emplace_back(it->second, key);
+				}
+			}
+			std::ranges::sort(inserts, std::greater{});
+			for (const auto& [after, key] : inserts) {
+				auto& lines = additions[key];
+				ini.lines.insert(ini.lines.begin() + static_cast<std::ptrdiff_t>(after + 1), lines.begin(), lines.end());
+				additions.erase(key);
+			}
+
+			// Sections that do not exist yet go at the end.
+			for (const auto& key : sectionOrder) {
+				const auto it = additions.find(key);
+				if (it == additions.end()) {
+					continue;
+				}
+				const auto& field = *std::ranges::find_if(fields, [&](const Field& a_f) { return Lower(std::string(a_f.section)) == key; });
+				if (!ini.lines.empty() && !Trim(ini.lines.back()).empty()) {
+					ini.lines.emplace_back();
+				}
+				ini.lines.push_back(std::format("[{}]", field.section));
+				ini.lines.insert(ini.lines.end(), it->second.begin(), it->second.end());
+			}
+		}
+
+		if (!changed) {
+			return true;
+		}
+
+		if (!WriteIni(path, ini)) {
+			return false;
+		}
+		logs::info("Settings saved to {}", path.string());
+		return true;
 	}
 }
+

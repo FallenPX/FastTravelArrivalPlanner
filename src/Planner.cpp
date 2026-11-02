@@ -249,8 +249,8 @@ namespace FTAP::Planner
 			const std::string body = data->bodyText.c_str() ? data->bodyText.c_str() : "";
 			logs::info("Fast-travel confirmation box opened: \"{}\"", body);
 
-			if (!settings->enabled || !settings->showPanel) {
-				logs::info("  Panel switched off in the INI: the game's box stays");
+			if (!settings->showPanel) {
+				logs::info("  Panel switched off in the settings: the game's box stays");
 				return;
 			}
 			if (!g_mapOpen || g_mapFromConversation) {
@@ -262,7 +262,7 @@ namespace FTAP::Planner
 				return;
 			}
 			if (!Panel::IsAvailable()) {
-				logs::info("  No arrival panel is available (Interface\\FastTravelArrivalPlanner.swf missing and SKSE Menu Framework not installed): the game's box stays");
+				logs::info("  The arrival panel is not available (Interface\\FastTravelArrivalPlanner.swf missing): the game's box stays");
 				return;
 			}
 
@@ -454,7 +454,7 @@ namespace FTAP::Planner
 			}
 		}
 
-		// A choice waiting for the panel to let go of the screen (UI thread). Checked
+		// A choice waiting for the panel to close (UI thread). Checked
 		// once per map frame by the map hook below, never by a task that queues itself again.
 		std::optional<Choice> g_pendingChoice;
 		int                   g_pendingFrames{ 0 };
@@ -466,7 +466,7 @@ namespace FTAP::Planner
 				Execute(a_choice);
 				return;
 			}
-			logs::info("Waiting for {} to let go of the screen before carrying out the choice", Panel::Name());
+			logs::info("Waiting for the panel to close before carrying out the choice");
 			std::lock_guard guard{ g_lock };
 			g_pendingChoice = a_choice;
 			g_pendingFrames = 0;
@@ -844,7 +844,7 @@ namespace FTAP::Planner
 						if (g_pendingChoice && (Panel::IsReleased() || ++g_pendingFrames >= MAX_PENDING_FRAMES)) {
 							ready = g_pendingChoice;
 							g_pendingChoice.reset();
-							logs::info("{} let go after {} map frame(s){}", Panel::Name(), g_pendingFrames,
+							logs::info("The panel closed after {} map frame(s){}", g_pendingFrames,
 								g_pendingFrames >= MAX_PENDING_FRAMES ? " (stopped waiting)" : "");
 						}
 					}
