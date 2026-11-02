@@ -292,7 +292,14 @@ namespace FTAP
 			       std::ranges::all_of(a_key, [](unsigned char c) { return std::isalnum(c) || c == '_'; });
 		}
 
-		// The key of an option line, active or commented out, whatever its name.
+		bool IsObsolete(std::string_view a_key)
+		{
+			return std::ranges::find(OBSOLETE_KEYS, a_key) != OBSOLETE_KEYS.end();
+		}
+
+		// The key of an option line: an active "key = value" line, or one commented out that
+		// names an option of this version or an obsolete one. Explanations that happen to
+		// contain " = " ("; Empty = the flyout's font ...") are not options.
 		std::optional<std::string> AnyKey(const std::string& a_line)
 		{
 			if (const auto parsed = ParseKeyLine(a_line); parsed && IsOptionName(parsed->key)) {
@@ -306,7 +313,7 @@ namespace FTAP
 			if (start == std::string::npos) {
 				return std::nullopt;
 			}
-			if (const auto parsed = ParseKeyLine(trimmed.substr(start)); parsed && IsOptionName(parsed->key)) {
+			if (const auto parsed = ParseKeyLine(trimmed.substr(start)); parsed && (FindField(parsed->key) || IsObsolete(parsed->key))) {
 				return parsed->key;
 			}
 			return std::nullopt;
@@ -317,7 +324,7 @@ namespace FTAP
 			std::vector<std::string> removed;
 			for (std::size_t i = 0; i < a_ini.lines.size();) {
 				const auto key = AnyKey(a_ini.lines[i]);
-				if (!key || std::ranges::find(OBSOLETE_KEYS, std::string_view(*key)) == OBSOLETE_KEYS.end()) {
+				if (!key || !IsObsolete(*key)) {
 					++i;
 					continue;
 				}
@@ -384,25 +391,28 @@ namespace FTAP
 			return true;
 		}
 
-		// Sections left without a single line (their options were all dropped), with the blank
-		// line that separated them.
-		std::vector<std::string> RemoveEmptySections(IniFile& a_ini)
+		// Sections that no option of this version belongs to and that hold no option any more
+		// (all of theirs were dropped), with whatever comments are left in them and the blank
+		// line that separated them. A section that still holds an option line is kept.
+		std::vector<std::string> RemoveUnusedSections(IniFile& a_ini)
 		{
 			std::vector<std::string> removed;
 			for (std::size_t i = 0; i < a_ini.lines.size();) {
-				if (!SectionName(a_ini.lines[i])) {
+				const auto name = SectionName(a_ini.lines[i]);
+				if (!name) {
 					++i;
 					continue;
 				}
 				std::size_t end = i + 1;
-				bool        empty = true;
+				bool        holdsOption = false;
 				while (end < a_ini.lines.size() && !SectionName(a_ini.lines[end])) {
-					if (!Trim(a_ini.lines[end]).empty()) {
-						empty = false;
+					if (AnyKey(a_ini.lines[end])) {
+						holdsOption = true;
 					}
 					++end;
 				}
-				if (!empty) {
+				const bool used = std::ranges::any_of(Fields(), [&](const Field& a_field) { return Lower(std::string(a_field.section)) == *name; });
+				if (used || holdsOption) {
 					i = end;
 					continue;
 				}
@@ -473,7 +483,7 @@ namespace FTAP
 			}
 			const bool migrated = MigrateMasterSwitch(mine);
 			const auto removed = RemoveObsolete(mine);
-			const auto emptied = RemoveEmptySections(mine);
+			const auto emptied = RemoveUnusedSections(mine);
 			const bool tidied = migrated || !removed.empty() || !emptied.empty();
 			const auto logRemoved = [&]() {
 				if (migrated) {
@@ -483,7 +493,7 @@ namespace FTAP
 					logs::info("Removed option(s) this version no longer uses from your settings file: {}", JoinNames(removed));
 				}
 				if (!emptied.empty()) {
-					logs::info("Removed section(s) left empty from your settings file: {}", JoinNames(emptied));
+					logs::info("Removed section(s) this version no longer uses from your settings file: {}", JoinNames(emptied));
 				}
 			};
 			if (!defaults.exists) {
