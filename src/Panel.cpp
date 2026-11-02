@@ -81,8 +81,9 @@ namespace FTAP::Panel
 			float                         rowSize{ 0.0f };    // screen pixels (0 = keep the framework's size)
 			float                         titleSize{ 0.0f };
 			bool                          shadow{ false };
-			ImGuiMCP::ImU32               shadowColor{ 0 };
-			std::vector<ImGuiMCP::ImVec2> shadowOffsets;  // one for a drop shadow, four for a glow
+			// Each pass draws the text once more, offset and in the shadow's colour: a drop shadow
+			// is a dark pass plus a fainter, wider one for its soft edge; a glow is four thin ones.
+			std::vector<std::pair<ImGuiMCP::ImVec2, ImGuiMCP::ImU32>> shadowPasses;
 			std::string                   summary;        // for the log
 		};
 
@@ -137,20 +138,21 @@ namespace FTAP::Panel
 			}
 			look.rounding = style.cornerRadius * scale;
 
-			// Font, sizes and shadow. When FTTI cannot tell (older than 0.3.0, or the flyout has
-			// not been shown yet), the text gets a light drop shadow, as most map skins have.
+			// Font, sizes and shadow. When FTTI cannot tell whether the flyout's text has a shadow
+			// (most interfaces draw it in a way that cannot be read), the panel uses a shadow like
+			// the vanilla and Dear Diary ones: black, 2 map pixels down and to the right, slightly soft.
 			FTTI_API::FlyoutText text;
 			const bool           textKnown = Link::GetFlyoutText(text);
 			look.rowFont = text.rowFont;
 			look.titleFont = text.titleFont;
 			// Sizes outside what any screen could show are ignored (the framework's size is kept).
-			const auto plausible = [](float a_px) { return a_px >= 9.0f && a_px <= 96.0f; };
+			const auto plausible = [](float a_px) { return a_px >= 9.0f && a_px <= 240.0f; };
 			look.rowSize = plausible(text.rowSize) ? text.rowSize : 0.0f;
 			look.titleSize = plausible(text.titleSize) ? text.titleSize : 0.0f;
-			float alpha = 0.75f;
-			float distance = 1.5f;
-			float angle = 45.0f;
-			float blur = 0.0f;
+			float         alpha = 0.85f;
+			float         distance = 2.0f * scale;
+			float         angle = 45.0f;
+			float         blur = 2.0f * scale;
 			std::uint32_t color = 0x000000;
 			if (textKnown && text.shadowKnown) {  // FTTI 0.3.1+ could read the flyout's shadow
 				look.shadow = text.shadow && text.shadowAlpha > 0.02f;
@@ -163,16 +165,24 @@ namespace FTAP::Panel
 				look.shadow = true;
 			}
 			if (look.shadow) {
+				const float a = std::clamp(alpha, 0.0f, 1.0f);
 				if (distance >= 0.5f) {
 					const float radians = angle * 3.14159265f / 180.0f;
 					const float d = (std::max)(distance, 1.0f);
-					look.shadowOffsets.push_back(ImGuiMCP::ImVec2{ std::cos(radians) * d, std::sin(radians) * d });
+					const float cx = std::cos(radians);
+					const float cy = std::sin(radians);
+					look.shadowPasses.emplace_back(ImGuiMCP::ImVec2{ cx * d, cy * d }, ImGuiMCP::GetColorU32(Rgb(color, a)));
+					if (blur >= 1.0f) {
+						const float e = d + (std::min)(blur * 0.5f, d);
+						look.shadowPasses.emplace_back(ImGuiMCP::ImVec2{ cx * e, cy * e }, ImGuiMCP::GetColorU32(Rgb(color, a * 0.45f)));
+					}
 				} else {  // a glow: a thin outline all round
 					const float d = std::clamp(blur * 0.4f, 1.0f, 2.0f);
-					look.shadowOffsets = { { -d, -d }, { d, -d }, { -d, d }, { d, d } };
-					alpha *= 0.7f;
+					const auto  c = ImGuiMCP::GetColorU32(Rgb(color, a * 0.7f));
+					for (const auto& o : { ImGuiMCP::ImVec2{ -d, -d }, ImGuiMCP::ImVec2{ d, -d }, ImGuiMCP::ImVec2{ -d, d }, ImGuiMCP::ImVec2{ d, d } }) {
+						look.shadowPasses.emplace_back(o, c);
+					}
 				}
-				look.shadowColor = ImGuiMCP::GetColorU32(Rgb(color, std::clamp(alpha, 0.0f, 1.0f)));
 			}
 			look.summary = std::format("fonts \"{}\" / \"{}\", sizes {:.1f} / {:.1f} px, {}", look.titleFont, look.rowFont,
 				look.titleSize, look.rowSize,
@@ -230,8 +240,8 @@ namespace FTAP::Panel
 			if (a_look.match && a_look.shadow) {
 				const auto pos = ImGuiMCP::GetCursorScreenPos();
 				auto*      drawList = ImGuiMCP::GetWindowDrawList();
-				for (const auto& offset : a_look.shadowOffsets) {
-					ImGuiMCP::ImDrawListManager::AddText(drawList, ImGuiMCP::ImVec2{ pos.x + offset.x, pos.y + offset.y }, a_look.shadowColor, a_text);
+				for (auto it = a_look.shadowPasses.rbegin(); it != a_look.shadowPasses.rend(); ++it) {  // soft edge first
+					ImGuiMCP::ImDrawListManager::AddText(drawList, ImGuiMCP::ImVec2{ pos.x + it->first.x, pos.y + it->first.y }, it->second, a_text);
 				}
 			}
 			ImGuiMCP::TextColored(a_color, "%s", a_text);
@@ -291,9 +301,10 @@ namespace FTAP::Panel
 			const ImVec2 c{ pos.x + r + size * 0.05f, pos.y + size * 0.52f };
 			auto*        drawList = GetWindowDrawList();
 			if (a_look.shadow) {
-				for (const auto& o : a_look.shadowOffsets) {
+				for (auto it = a_look.shadowPasses.rbegin(); it != a_look.shadowPasses.rend(); ++it) {
+					const auto& o = it->first;
 					ImDrawListManager::AddQuadFilled(drawList, ImVec2{ c.x + o.x, c.y - r * 1.35f + o.y }, ImVec2{ c.x + r + o.x, c.y + o.y },
-						ImVec2{ c.x + o.x, c.y + r * 1.35f + o.y }, ImVec2{ c.x - r + o.x, c.y + o.y }, a_look.shadowColor);
+						ImVec2{ c.x + o.x, c.y + r * 1.35f + o.y }, ImVec2{ c.x - r + o.x, c.y + o.y }, it->second);
 				}
 			}
 			ImDrawListManager::AddQuadFilled(drawList, ImVec2{ c.x, c.y - r * 1.35f }, ImVec2{ c.x + r, c.y },
@@ -333,8 +344,8 @@ namespace FTAP::Panel
 				const ImVec2 at{ min.x + (max.x - min.x - text.x) * 0.5f, min.y + (max.y - min.y - text.y) * 0.5f };
 				auto*        drawList = GetWindowDrawList();
 				if (a_look.shadow && a_enabled) {
-					for (const auto& o : a_look.shadowOffsets) {
-						ImDrawListManager::AddText(drawList, ImVec2{ at.x + o.x, at.y + o.y }, a_look.shadowColor, a_label);
+					for (auto it = a_look.shadowPasses.rbegin(); it != a_look.shadowPasses.rend(); ++it) {
+						ImDrawListManager::AddText(drawList, ImVec2{ at.x + it->first.x, at.y + it->first.y }, it->second, a_label);
 					}
 				}
 				// GetColorU32 also applies the disabled fade.
